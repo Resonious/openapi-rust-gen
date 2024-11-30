@@ -1,0 +1,13 @@
+[package]
+name = "testbed"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+http = "1.1.0"
+http-body-util = "0.1.2"
+hyper = { version = "1.5.1", features = ["full"] }
+hyper-util = { version = "0.1.10", features = ["full"] }
+tokio = { version = "1.41.1", features = ["full"] }
+testgen = { path = "../testgen" }
+async-trait = "0.1.83"
