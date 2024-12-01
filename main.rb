@@ -83,6 +83,11 @@ else
     end
   end
 
+  # puts enum GetPath {
+  #   MyThings,
+  #   YourThings,
+  #   ...
+  # }
   paths_by_method.each do |method, paths|
     puts "pub enum #{camelize(method)}Path {"
     paths.each do |path|
@@ -93,13 +98,20 @@ else
 
   puts
 
+  # statc GET_ROUTER = Lazy<Router<GetPath>> = Lazy::new(|| {
+  #     let mut router = Router::new();
+  #     router.insert("/my/things", GetPath::MyThings).unwrap();
+  #     router.insert("/your/things", GetPath::YourThings).unwrap();
+  #     ...
+  #     router
+  # });
   paths_by_method.each do |method, paths|
     puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
     puts "    let mut router = Router::new();"
     paths.each do |path|
-      puts "    router.insert(#{path.inspect}, #{camelize(method)}Path::#{camelize(path)});"
+      puts "    router.insert(#{path.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
     end
     puts "    router"
-    puts "}"
+    puts "});"
   end
 end
