@@ -3,6 +3,18 @@ use http::{Request, Response, StatusCode};
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt;
 use bytes::Bytes;
+use once_cell::sync::Lazy;
+
+pub enum GetPaths {
+    GetOne,
+    PostTwo,
+}
+
+static GET_ROUTER: Lazy<matchit::Router<GetPaths>> = Lazy::new(|| {
+    let mut router = matchit::Router::new();
+    router.insert("/one/{two}", GetPaths::GetOne).unwrap();
+    router
+});
 
 pub async fn handle<A: Api, B: HttpBody>(api: A, request: Request<B>) -> Response<Bytes> {
     let (parts, body) = request.into_parts();
