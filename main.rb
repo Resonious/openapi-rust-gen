@@ -1,4 +1,5 @@
 require "json"
+require "debug"
 
 def upper?(c) = c.upcase == c
 def lower?(c) = c.downcase == c
@@ -67,6 +68,7 @@ if ARGV[0] == 'test'
 
     def test_path_enum_ident
       assert_equal "GetOneTwoThree", camelize("get", "/one/{two}/three")
+      assert_equal "AlreadyCamelized", camelize("AlreadyCamelized")
     end
 
     def test_snake
@@ -127,41 +129,67 @@ else
   puts
 
   type_of = lambda do |prop|
+    if ref = prop["$ref"]
+      %r{#/components/schemas/(?<type_name>\w+)} =~ ref
+      raise "??? #{ref}" if type_name.nil?
+      next type_name
+    end
+
     case prop.fetch("type")
-    when "string" then return "String"
+    when "string" then next "String"
     when "integer"
       case prop.fetch("format")
       when "int32" then "i32"
       when "int64" then "i64"
       else raise "? #{prop.inspect}"
       end
+    when "array" then "Vec<#{type_of[prop.fetch("items")]}>"
     else
       raise "unknown type #{prop.inspect}"
     end
   end
 
-  schema.fetch("components").fetch("schemas").each do |model, definition|
+  follow_ref = lambda do |ref|
+    value = schema
+    ref.split("/").each do |key|
+      next if key == "#"
+      value = value[key]
+    end
+    value
+  end
+
+  puts_struct_fields = lambda do |definition|
+    while ref = definition["$ref"]
+      definition = follow_ref[ref]
+    end
+
     required = {}
     definition.fetch("required", []).each { |field| required[field] = true }
+
+    definition.fetch("properties").each do |key, prop|
+      type = type_of[prop]
+      type = "Option<#{type}>" unless required[key]
+      puts "    #{key}: #{type},"
+    end
+  end
+
+  schema.fetch("components").fetch("schemas").each do |model, definition|
+    if all_of = definition["allOf"]
+      puts "pub struct #{model} {"
+      all_of.each(&puts_struct_fields)
+      puts "}"
+      next
+    end
 
     case definition.fetch("type")
     when "object"
       puts "pub struct #{model} {"
-      definition.fetch("properties").each do |key, prop|
-        type = type_of[prop]
-        type = "Option<#{type}>" unless required[key]
-        puts "    #{key}: #{type},"
-      end
+      puts_struct_fields[definition]
       puts "}"
     when "array"
-      elements_ref = definition.fetch("items").fetch("$ref")
-      %r{#/components/schemas/(?<ref_model>\w+)} =~ elements_ref
-      raise "uhhh nooo #{definition.inspect}" if elements_ref.nil?
-
-      puts "type #{model} = Vec<#{ref_model}>;"
+      items = definition.fetch("items")
+      puts "type #{model} = Vec<#{type_of[items]}>;"
     end
-
-    puts
   end
 
   puts
@@ -170,6 +198,25 @@ else
   operation_name = lambda do |method, path, definition|
     definition["operationId"] || "#{method} #{path}"
   end
+
+  # request/response??
+  schema.fetch("paths").each do |path, methods|
+    methods.each do |method, definition|
+      op_name = camelize(operation_name[method, path, definition])
+
+      puts "pub enum #{op_name}Response {"
+      definition.fetch("responses").each do |status_code, response|
+        content = response.dig("content", "application/json", "schema")
+        type = type_of[content] if content
+        enum_args = "(#{type})" if type
+
+        puts "    #{camelize("Http #{status_code}")}#{enum_args},"
+      end
+      puts "}"
+    end
+  end
+
+  puts
 
   schema.fetch("paths").each do |path, methods|
     methods.each do |method, definition|
