@@ -194,12 +194,11 @@ else
 
   puts
 
-  # TODO: maybe generate the trait here?
   operation_name = lambda do |method, path, definition|
     definition["operationId"] || "#{method} #{path}"
   end
 
-  # request/response??
+  # request/response objects
   schema.fetch("paths").each do |path, methods|
     methods.each do |method, definition|
       op_name = camelize(operation_name[method, path, definition])
@@ -210,7 +209,11 @@ else
         type = type_of[content] if content
         enum_args = "(#{type})" if type
 
-        puts "    #{camelize("Http #{status_code}")}#{enum_args},"
+        if status_code =~ /^\d/
+          puts "    #{camelize("Http #{status_code}")}#{enum_args},"
+        else
+          puts "    #{camelize(status_code)}#{enum_args},"
+        end
       end
       puts "}"
     end
@@ -218,9 +221,40 @@ else
 
   puts
 
+  puts "#[async_trait]"
+  puts "pub trait Api {"
+  functions = []
   schema.fetch("paths").each do |path, methods|
     methods.each do |method, definition|
-      puts snakeize(operation_name[method, path, definition])
+      op_name = operation_name[method, path, definition]
+      camel_op_name = camelize(op_name)
+      snake_op_name = snakeize(op_name)
+
+      fn_def = [
+        "    ",
+        "async fn ",
+        snake_op_name,
+        "(\n"
+      ]
+
+      definition.fetch("parameters", []).each do |parameter|
+        fn_def << "        "
+        fn_def << snakeize(parameter.fetch("name")) << ": "
+        fn_def << type_of[parameter.fetch("schema")] << ",\n"
+      end
+
+      if (request_body = definition["requestBody"])
+        content = request_body.dig("content", "application/json", "schema")
+        fn_def << "        "
+        fn_def << "body: " << type_of[content]
+        fn_def << ",\n"
+      end
+
+      fn_def << "    ) -> " << camel_op_name << "Response;"
+
+      functions << fn_def.join
     end
   end
+  puts functions.join("\n\n")
+  puts "}"
 end
