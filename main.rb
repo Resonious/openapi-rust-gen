@@ -329,10 +329,14 @@ else
         actual_status_code = status_code.to_i
         actual_status_code = 500 if actual_status_code < 100
 
-        puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]} => {"
+        content = response.dig("content", "application/json", "schema")
+        enum_args = "(body)" if content
+
+        puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
+        puts "                                    let body = \"\";" unless enum_args
         puts "                                    return Response::builder()"
         puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
-        puts "                                        .body(result.into()).unwrap();"
+        puts "                                        .body(body.into()).unwrap();"
         puts "                                }"
       end
 
