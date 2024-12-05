@@ -59,29 +59,8 @@ def camelize(*args)
   result_chars.join
 end
 
-if ARGV[0] == 'test'
-  require "minitest/autorun"
-
-  class Test < Minitest::Test
-    def setup
-    end
-
-    def test_path_enum_ident
-      assert_equal "GetOneTwoThree", camelize("get", "/one/{two}/three")
-      assert_equal "AlreadyCamelized", camelize("AlreadyCamelized")
-    end
-
-    def test_snake
-      assert_equal "one_two_three", snakeize("/one/two/three")
-      assert_equal "go_getit", snakeize("go GETIT")
-      assert_equal "go_getit", snakeize("goGetit")
-    end
-  end
-else
-  json = File.read ARGV[0]
-  schema = JSON.parse(json)
-
-  puts <<~RUST
+def generate_lib_rs(schema, o = STDOUT)
+  o.puts <<~RUST
     use std::collections::HashMap;
     use async_trait::*;
     use http::{Method, Request, Response, StatusCode};
@@ -92,7 +71,7 @@ else
     use once_cell::sync::Lazy;
     use url::Url;
   RUST
-  puts
+  o.puts
 
   # { method => Array<path> }
   paths_by_method = {}
@@ -103,20 +82,20 @@ else
     end
   end
 
-  # puts enum GetPath {
+  # enum GetPath {
   #   MyThings,
   #   YourThings,
   #   ...
   # }
   paths_by_method.each do |method, paths|
-    puts "pub enum #{camelize(method)}Path {"
+    o.puts "pub enum #{camelize(method)}Path {"
     paths.each do |path|
-      puts "    #{camelize(path)},"
+      o.puts "    #{camelize(path)},"
     end
-    puts "}"
+    o.puts "}"
   end
 
-  puts
+  o.puts
 
   # statc GET_ROUTER = Lazy<Router<GetPath>> = Lazy::new(|| {
   #     let mut router = Router::new();
@@ -126,16 +105,16 @@ else
   #     router
   # });
   paths_by_method.each do |method, paths|
-    puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
-    puts "    let mut router = Router::new();"
+    o.puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
+    o.puts "    let mut router = Router::new();"
     paths.each do |path|
-      puts "    router.insert(#{path.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
+      o.puts "    router.insert(#{path.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
     end
-    puts "    router"
-    puts "});"
+    o.puts "    router"
+    o.puts "});"
   end
 
-  puts
+  o.puts
 
   type_of = lambda do |prop|
     if ref = prop["$ref"]
@@ -178,30 +157,30 @@ else
     definition.fetch("properties").each do |key, prop|
       type = type_of[prop]
       type = "Option<#{type}>" unless required[key]
-      puts "    #{key}: #{type},"
+      o.puts "    #{key}: #{type},"
     end
   end
 
   schema.fetch("components").fetch("schemas").each do |model, definition|
     if all_of = definition["allOf"]
-      puts "pub struct #{model} {"
+      o.puts "pub struct #{model} {"
       all_of.each(&puts_struct_fields)
-      puts "}"
+      o.puts "}"
       next
     end
 
     case definition.fetch("type")
     when "object"
-      puts "pub struct #{model} {"
+      o.puts "pub struct #{model} {"
       puts_struct_fields[definition]
-      puts "}"
+      o.puts "}"
     when "array"
       items = definition.fetch("items")
-      puts "type #{model} = Vec<#{type_of[items]}>;"
+      o.puts "type #{model} = Vec<#{type_of[items]}>;"
     end
   end
 
-  puts
+  o.puts
 
   operation_name = lambda do |method, path, definition|
     definition["operationId"] || "#{method} #{path}"
@@ -220,22 +199,24 @@ else
     methods.each do |method, definition|
       op_name = camelize(operation_name[method, path, definition])
 
-      puts "pub enum #{op_name}Response {"
+      o.puts "pub enum #{op_name}Response {"
       definition.fetch("responses").each do |status_code, response|
         content = response.dig("content", "application/json", "schema")
         type = type_of[content] if content
         enum_args = "(#{type})" if type
 
-        puts "    #{response_enum_name[status_code, response]}#{enum_args},"
+        o.puts "    #{response_enum_name[status_code, response]}#{enum_args},"
       end
-      puts "}"
+      o.puts "}"
     end
   end
 
-  puts
+  o.puts
 
-  puts "#[async_trait]"
-  puts "pub trait Api {"
+  # Api trait for user to implement
+
+  o.puts "#[async_trait]"
+  o.puts "pub trait Api {"
   functions = []
   schema.fetch("paths").each do |path, methods|
     methods.each do |method, definition|
@@ -273,32 +254,32 @@ else
       functions << fn_def.join
     end
   end
-  puts functions.join("\n\n")
-  puts "}"
+  o.puts functions.join("\n\n")
+  o.puts "}"
 
-  puts
+  o.puts
 
   # HTTP handler
 
-  puts "pub async fn handle<A: Api, B: HttpBody>(api: &mut A, request: Request<B>) -> Response<Bytes> {"
-  puts "    let (parts, body) = request.into_parts();"
-  puts
-  puts "    let Ok(url) = Url::parse(&parts.uri.to_string()) else {"
-  puts "        return Response::builder()"
-  puts "            .status(StatusCode::BAD_REQUEST)"
-  puts "            .body(\"{\\\"error\\\":\\\"bad URL\\\"}\".into()).unwrap();"
-  puts "    };"
-  puts "    let mut query_pairs = HashMap::new();"
-  puts "    for (key, value) in url.query_pairs() {"
-  puts "        query_pairs.insert(key, value);"
-  puts "    }"
-  puts
-  puts "    match parts.method {"
+  o.puts "pub async fn handle<A: Api, B: HttpBody>(api: &mut A, request: Request<B>) -> Response<Bytes> {"
+  o.puts "    let (parts, body) = request.into_parts();"
+  o.puts
+  o.puts "    let Ok(url) = Url::parse(&parts.uri.to_string()) else {"
+  o.puts "        return Response::builder()"
+  o.puts "            .status(StatusCode::BAD_REQUEST)"
+  o.puts "            .body(\"{\\\"error\\\":\\\"bad URL\\\"}\".into()).unwrap();"
+  o.puts "    };"
+  o.puts "    let mut query_pairs = HashMap::new();"
+  o.puts "    for (key, value) in url.query_pairs() {"
+  o.puts "        query_pairs.insert(key, value);"
+  o.puts "    }"
+  o.puts
+  o.puts "    match parts.method {"
   paths_by_method.each do |method, paths|
-    puts "        Method::#{method.upcase} => {"
-    puts "            match #{method.upcase}_ROUTER.at(parts.uri.path()) => {"
-    puts "                Ok(Match { value, params }) => {"
-    puts "                    match value {"
+    o.puts "        Method::#{method.upcase} => {"
+    o.puts "            match #{method.upcase}_ROUTER.at(parts.uri.path()) => {"
+    o.puts "                Ok(Match { value, params }) => {"
+    o.puts "                    match value {"
 
     paths.each do |path|
       definition = schema.dig("paths", path, method)
@@ -307,7 +288,7 @@ else
       camel_op_name = camelize(op_name)
       snake_op_name = snakeize(op_name)
 
-      puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
+      o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
       args = definition.fetch("parameters", []).map do |parameter|
         case parameter.fetch("in")
@@ -320,10 +301,10 @@ else
         end
       end
 
-      puts "                            let result = api.#{snake_op_name}(\n"
-      puts args.map { |a| "    " * 8 + a }.join("\n")
-      puts "                            ).await;"
-      puts "                            match result {"
+      o.puts "                            let result = api.#{snake_op_name}(\n"
+      o.puts args.map { |a| "    " * 8 + a }.join("\n")
+      o.puts "                            ).await;"
+      o.puts "                            match result {"
 
       definition.fetch("responses").each do |status_code, response|
         actual_status_code = status_code.to_i
@@ -332,31 +313,99 @@ else
         content = response.dig("content", "application/json", "schema")
         enum_args = "(body)" if content
 
-        puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
-        puts "                                    let body = \"\";" unless enum_args
-        puts "                                    return Response::builder()"
-        puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
-        puts "                                        .body(body.into()).unwrap();"
-        puts "                                }"
+        o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
+        o.puts "                                    let body = \"\";" unless enum_args
+        o.puts "                                    return Response::builder()"
+        o.puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
+        o.puts "                                        .body(body.into()).unwrap();"
+        o.puts "                                }"
       end
 
-      puts "                            }"
-      puts "                        }"
+      o.puts "                            }"
+      o.puts "                        }"
     end
 
-    puts "                    }"
-    puts "                    Err(MatchError::NotFound) => {"
-    puts "                        return Response::builder()"
-    puts "                            .status(StatusCode::NOT_FOUND)"
-    puts "                            .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap();"
-    puts "                    }"
-    puts "                }"
-    puts "            }"
-    puts "        }"
+    o.puts "                    }"
+    o.puts "                    Err(MatchError::NotFound) => {"
+    o.puts "                        return Response::builder()"
+    o.puts "                            .status(StatusCode::NOT_FOUND)"
+    o.puts "                            .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap();"
+    o.puts "                    }"
+    o.puts "                }"
+    o.puts "            }"
+    o.puts "        }"
   end
-  puts "    }"
-  puts "    Response::Builder()"
-  puts "        .status(StatusCode::METHOD_NOT_ALLOWED)"
-  puts "        .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
-  puts "}"
+  o.puts "    }"
+  o.puts "    Response::Builder()"
+  o.puts "        .status(StatusCode::METHOD_NOT_ALLOWED)"
+  o.puts "        .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
+  o.puts "}"
+end
+
+def generate_cargo_toml(schema, name, o = STDOUT)
+  title = schema.dig("info", "title") || "api";
+
+  o.puts <<~RUST
+    [package]
+    name = #{name.inspect}
+    title = #{title.inspect}
+    version = "0.1.0"
+    edition = "2021"
+
+    [dependencies]
+    async-trait = "0.1.83"
+    bytes = "1.9.0"
+    http = "1.1.0"
+    http-body = "1.0.1"
+    http-body-util = "0.1.2"
+    matchit = "0.8.5"
+    once_cell = "1.20.2"
+    serde = { version = "1.0.215", features = ["derive"] }
+    serde_json = "1.0.133"
+    url = "2.5.4"
+  RUST
+end
+
+def generate_project(schema, name)
+  FileUtils.mkdir(name)
+  Dir.chdir name do
+    FileUtils.mkdir_p("src")
+
+    File.open("Cargo.toml", "w") do |cargo_toml|
+      generate_cargo_toml schema, name, cargo_toml
+    end
+
+    File.open("src/lib.rs", "w") do |lib_rs|
+      generate_lib_rs schema, lib_rs
+    end
+  end
+end
+
+if ARGV[0] == 'test'
+  require "minitest/autorun"
+
+  class Test < Minitest::Test
+    def setup
+    end
+
+    def test_path_enum_ident
+      assert_equal "GetOneTwoThree", camelize("get", "/one/{two}/three")
+      assert_equal "AlreadyCamelized", camelize("AlreadyCamelized")
+    end
+
+    def test_snake
+      assert_equal "one_two_three", snakeize("/one/two/three")
+      assert_equal "go_getit", snakeize("go GETIT")
+      assert_equal "go_getit", snakeize("goGetit")
+    end
+  end
+else
+  json = File.read ARGV[0]
+  schema = JSON.parse(json)
+
+  dir = ARGV[1]
+  raise "usage: #{__FILE__} /path/to/schema.json project_dir" if dir.nil?
+
+  generate_project schema, dir
+  puts "Done."
 end
