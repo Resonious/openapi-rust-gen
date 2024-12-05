@@ -82,6 +82,7 @@ else
   schema = JSON.parse(json)
 
   puts <<~RUST
+    use std::collections::HashMap;
     use async_trait::*;
     use http::{Method, Request, Response, StatusCode};
     use http_body::Body as HttpBody;
@@ -89,6 +90,7 @@ else
     use bytes::Bytes;
     use matchit::{Match, MatchError};
     use once_cell::sync::Lazy;
+    use url::Url;
   RUST
   puts
 
@@ -245,13 +247,18 @@ else
         "    ",
         "async fn ",
         snake_op_name,
-        "(\n"
+        "(\n",
+        "        &mut self,\n"
       ]
 
       definition.fetch("parameters", []).each do |parameter|
         fn_def << "        "
         fn_def << snakeize(parameter.fetch("name")) << ": "
-        fn_def << type_of[parameter.fetch("schema")] << ",\n"
+
+        case parameter.fetch("in")
+        when "path" then fn_def << type_of[parameter.fetch("schema")] << ",\n"
+        when "query" then fn_def << "Option<" << type_of[parameter.fetch("schema")] << ">,\n"
+        end
       end
 
       if (request_body = definition["requestBody"])
@@ -273,8 +280,19 @@ else
 
   # HTTP handler
 
-  puts "pub async fn handle<A: Api, B: HttpBody>(api: A, request: Request<B>) -> Response<Bytes> {"
+  puts "pub async fn handle<A: Api, B: HttpBody>(api: &mut A, request: Request<B>) -> Response<Bytes> {"
   puts "    let (parts, body) = request.into_parts();"
+  puts
+  puts "    let Ok(url) = Url::parse(&parts.uri.to_string()) else {"
+  puts "        return Response::builder()"
+  puts "            .status(StatusCode::BAD_REQUEST)"
+  puts "            .body(\"{\\\"error\\\":\\\"bad URL\\\"}\".into()).unwrap();"
+  puts "    };"
+  puts "    let mut query_pairs = HashMap::new();"
+  puts "    for (key, value) in url.query_pairs() {"
+  puts "        query_pairs.insert(key, value);"
+  puts "    }"
+  puts
   puts "    match parts.method {"
   paths_by_method.each do |method, paths|
     puts "        Method::#{method.upcase} => {"
@@ -290,7 +308,21 @@ else
       snake_op_name = snakeize(op_name)
 
       puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
-      puts "                            let result = api.#{snake_op_name}().await;"
+
+      args = definition.fetch("parameters", []).map do |parameter|
+        case parameter.fetch("in")
+        when "path"
+          "params.get(#{parameter.fetch("name").inspect}).unwrap(),"
+        when "query"
+          "query_pairs.get(#{parameter.fetch("name").inspect}).map(|x| x.to_string()),"
+        else
+          raise "Unknown parameter source #{parameter["in"].inspect}"
+        end
+      end
+
+      puts "                            let result = api.#{snake_op_name}(\n"
+      puts args.map { |a| "    " * 8 + a }.join("\n")
+      puts "                            ).await;"
       puts "                            match result {"
 
       definition.fetch("responses").each do |status_code, response|
@@ -318,9 +350,9 @@ else
     puts "            }"
     puts "        }"
   end
-  puts "        Response::Builder()"
-  puts "            .status(StatusCode::METHOD_NOT_ALLOWED)"
-  puts "            .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
   puts "    }"
+  puts "    Response::Builder()"
+  puts "        .status(StatusCode::METHOD_NOT_ALLOWED)"
+  puts "        .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
   puts "}"
 end

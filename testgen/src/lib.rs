@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use async_trait::*;
 use http::{Method, Request, Response, StatusCode};
 use http_body::Body as HttpBody;
@@ -5,6 +6,7 @@ use http_body_util::BodyExt;
 use bytes::Bytes;
 use matchit::{Match, MatchError};
 use once_cell::sync::Lazy;
+use url::Url;
 
 pub enum GetPaths {
     GetOne,
@@ -19,12 +21,21 @@ static GET_ROUTER: Lazy<matchit::Router<GetPaths>> = Lazy::new(|| {
 
 pub async fn handle<A: Api, B: HttpBody>(api: A, request: Request<B>) -> Response<Bytes> {
     let (parts, body) = request.into_parts();
+    let Ok(url) = Url::parse(&parts.uri.to_string()) else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body("{\"erro\":\"bad URL\"}".into()).unwrap();
+    };
+    let mut query_pairs = HashMap::new();
+    for (key, value) in url.query_pairs() {
+        query_pairs.insert(key, value);
+    }
 
     match parts.method {
         Method::GET => {
             match GET_ROUTER.at(parts.uri.path()) {
                 Ok(Match { value, params }) => {
-                    let p = params.get("ho");
+                    let x: Option<String> = query_pairs.get("hij;").map(|x| x.to_string());
 
                     match value {
                         GetPaths::GetOne => {
