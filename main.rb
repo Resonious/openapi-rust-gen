@@ -81,8 +81,15 @@ else
   json = File.read ARGV[0]
   schema = JSON.parse(json)
 
-  puts "use matchit::Router;"
-  puts "use once_cell::sync::Lazy;"
+  puts <<~RUST
+    use async_trait::*;
+    use http::{Method, Request, Response, StatusCode};
+    use http_body::Body as HttpBody;
+    use http_body_util::BodyExt;
+    use bytes::Bytes;
+    use matchit::{Match, MatchError};
+    use once_cell::sync::Lazy;
+  RUST
   puts
 
   # { method => Array<path> }
@@ -199,6 +206,14 @@ else
   end
 
   # request/response objects
+  response_enum_name = lambda do |status_code, response|
+    if status_code =~ /^\d/
+      camelize("Http #{status_code}")
+    else
+      camelize(status_code)
+    end
+  end
+
   schema.fetch("paths").each do |path, methods|
     methods.each do |method, definition|
       op_name = camelize(operation_name[method, path, definition])
@@ -209,11 +224,7 @@ else
         type = type_of[content] if content
         enum_args = "(#{type})" if type
 
-        if status_code =~ /^\d/
-          puts "    #{camelize("Http #{status_code}")}#{enum_args},"
-        else
-          puts "    #{camelize(status_code)}#{enum_args},"
-        end
+        puts "    #{response_enum_name[status_code, response]}#{enum_args},"
       end
       puts "}"
     end
@@ -256,5 +267,60 @@ else
     end
   end
   puts functions.join("\n\n")
+  puts "}"
+
+  puts
+
+  # HTTP handler
+
+  puts "pub async fn handle<A: Api, B: HttpBody>(api: A, request: Request<B>) -> Response<Bytes> {"
+  puts "    let (parts, body) = request.into_parts();"
+  puts "    match parts.method {"
+  paths_by_method.each do |method, paths|
+    puts "        Method::#{method.upcase} => {"
+    puts "            match #{method.upcase}_ROUTER.at(parts.uri.path()) => {"
+    puts "                Ok(Match { value, params }) => {"
+    puts "                    match value {"
+
+    paths.each do |path|
+      definition = schema.dig("paths", path, method)
+      raise "No def at #{method} #{path} ????" if definition.nil?
+      op_name = operation_name[method, path, definition]
+      camel_op_name = camelize(op_name)
+      snake_op_name = snakeize(op_name)
+
+      puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
+      puts "                            let result = api.#{snake_op_name}().await;"
+      puts "                            match result {"
+
+      definition.fetch("responses").each do |status_code, response|
+        actual_status_code = status_code.to_i
+        actual_status_code = 500 if actual_status_code < 100
+
+        puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]} => {"
+        puts "                                    return Response::builder()"
+        puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
+        puts "                                        .body(result.into()).unwrap();"
+        puts "                                }"
+      end
+
+      puts "                            }"
+      puts "                        }"
+    end
+
+    puts "                    }"
+    puts "                    Err(MatchError::NotFound) => {"
+    puts "                        return Response::builder()"
+    puts "                            .status(StatusCode::NOT_FOUND)"
+    puts "                            .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap();"
+    puts "                    }"
+    puts "                }"
+    puts "            }"
+    puts "        }"
+  end
+  puts "        Response::Builder()"
+  puts "            .status(StatusCode::METHOD_NOT_ALLOWED)"
+  puts "            .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
+  puts "    }"
   puts "}"
 end
