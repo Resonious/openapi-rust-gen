@@ -75,7 +75,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
   # { method => Array<path> }
   paths_by_method = {}
-  schema.fetch("paths").each do |path, methods|
+  schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
       paths_by_method[method] ||= []
       paths_by_method[method] << path
@@ -108,7 +108,7 @@ def generate_lib_rs(schema, o = STDOUT)
     o.puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
     o.puts "    let mut router = Router::new();"
     paths.each do |path|
-      o.puts "    router.insert(#{path.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
+      o.puts "    router.insert(#{path.to_s.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
     end
     o.puts "    router"
     o.puts "});"
@@ -117,23 +117,23 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts
 
   type_of = lambda do |prop|
-    if ref = prop["$ref"]
+    if ref = prop[:"$ref"]
       %r{#/components/schemas/(?<type_name>\w+)} =~ ref
       raise "??? #{ref}" if type_name.nil?
       next type_name
     end
 
-    case prop.fetch("type")
+    case prop.fetch(:type)
     when "string" then next "String"
     when "integer"
-      case prop.fetch("format")
+      case prop.fetch(:format)
       when "int32" then "i32"
       when "int64" then "i64"
-      else raise "? #{prop.inspect}"
+      else raise "? #{prop.to_s.inspect}"
       end
-    when "array" then "Vec<#{type_of[prop.fetch("items")]}>"
+    when "array" then "Vec<#{type_of[prop.fetch(:items)]}>"
     else
-      raise "unknown type #{prop.inspect}"
+      raise "unknown type #{prop.to_s.inspect}"
     end
   end
 
@@ -141,41 +141,41 @@ def generate_lib_rs(schema, o = STDOUT)
     value = schema
     ref.split("/").each do |key|
       next if key == "#"
-      value = value[key]
+      value = value[key.to_sym]
     end
     value
   end
 
   puts_struct_fields = lambda do |definition|
-    while ref = definition["$ref"]
+    while ref = definition[:"$ref"]
       definition = follow_ref[ref]
     end
 
     required = {}
-    definition.fetch("required", []).each { |field| required[field] = true }
+    definition.fetch(:required, []).each { |field| required[field] = true }
 
-    definition.fetch("properties").each do |key, prop|
+    definition.fetch(:properties).each do |key, prop|
       type = type_of[prop]
       type = "Option<#{type}>" unless required[key]
       o.puts "    #{key}: #{type},"
     end
   end
 
-  schema.fetch("components").fetch("schemas").each do |model, definition|
-    if all_of = definition["allOf"]
+  schema.fetch(:components).fetch(:schemas).each do |model, definition|
+    if all_of = definition[:allOf]
       o.puts "pub struct #{model} {"
       all_of.each(&puts_struct_fields)
       o.puts "}"
       next
     end
 
-    case definition.fetch("type")
+    case definition.fetch(:type)
     when "object"
       o.puts "pub struct #{model} {"
       puts_struct_fields[definition]
       o.puts "}"
     when "array"
-      items = definition.fetch("items")
+      items = definition.fetch(:items)
       o.puts "type #{model} = Vec<#{type_of[items]}>;"
     end
   end
@@ -183,7 +183,7 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts
 
   operation_name = lambda do |method, path, definition|
-    definition["operationId"] || "#{method} #{path}"
+    definition[:operationId] || "#{method} #{path}"
   end
 
   # request/response objects
@@ -195,13 +195,13 @@ def generate_lib_rs(schema, o = STDOUT)
     end
   end
 
-  schema.fetch("paths").each do |path, methods|
+  schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
       op_name = camelize(operation_name[method, path, definition])
 
       o.puts "pub enum #{op_name}Response {"
-      definition.fetch("responses").each do |status_code, response|
-        content = response.dig("content", "application/json", "schema")
+      definition.fetch(:responses).each do |status_code, response|
+        content = response.dig(:content, :"application/json", :schema)
         type = type_of[content] if content
         enum_args = "(#{type})" if type
 
@@ -218,7 +218,7 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts "#[async_trait]"
   o.puts "pub trait Api {"
   functions = []
-  schema.fetch("paths").each do |path, methods|
+  schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
       op_name = operation_name[method, path, definition]
       camel_op_name = camelize(op_name)
@@ -232,18 +232,18 @@ def generate_lib_rs(schema, o = STDOUT)
         "        &mut self,\n"
       ]
 
-      definition.fetch("parameters", []).each do |parameter|
+      definition.fetch(:parameters, []).each do |parameter|
         fn_def << "        "
-        fn_def << snakeize(parameter.fetch("name")) << ": "
+        fn_def << snakeize(parameter.fetch(:name)) << ": "
 
-        case parameter.fetch("in")
-        when "path" then fn_def << type_of[parameter.fetch("schema")] << ",\n"
-        when "query" then fn_def << "Option<" << type_of[parameter.fetch("schema")] << ">,\n"
+        case parameter.fetch(:in)
+        when "path" then fn_def << type_of[parameter.fetch(:schema)] << ",\n"
+        when "query" then fn_def << "Option<" << type_of[parameter.fetch(:schema)] << ">,\n"
         end
       end
 
       if (request_body = definition["requestBody"])
-        content = request_body.dig("content", "application/json", "schema")
+        content = request_body.dig(:content, :"application/json", :schema)
         fn_def << "        "
         fn_def << "body: " << type_of[content]
         fn_def << ",\n"
@@ -285,7 +285,7 @@ def generate_lib_rs(schema, o = STDOUT)
     o.puts "                    match value {"
 
     paths.each do |path|
-      definition = schema.dig("paths", path, method)
+      definition = schema.dig(:paths, path, method)
       raise "No def at #{method} #{path} ????" if definition.nil?
       op_name = operation_name[method, path, definition]
       camel_op_name = camelize(op_name)
@@ -293,14 +293,14 @@ def generate_lib_rs(schema, o = STDOUT)
 
       o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
-      args = definition.fetch("parameters", []).map do |parameter|
-        case parameter.fetch("in")
+      args = definition.fetch(:parameters, []).map do |parameter|
+        case parameter.fetch(:in)
         when "path"
-          "params.get(#{parameter.fetch("name").inspect}).unwrap(),"
+          "params.get(#{parameter.fetch(:name).to_s.inspect}).unwrap(),"
         when "query"
-          "query_pairs.get(#{parameter.fetch("name").inspect}).map(|x| x.to_string()),"
+          "query_pairs.get(#{parameter.fetch(:name).to_s.inspect}).map(|x| x.to_string()),"
         else
-          raise "Unknown parameter source #{parameter["in"].inspect}"
+          raise "Unknown parameter source #{parameter[:in].to_s.inspect}"
         end
       end
 
@@ -309,11 +309,11 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "                            ).await;"
       o.puts "                            match result {"
 
-      definition.fetch("responses").each do |status_code, response|
-        actual_status_code = status_code.to_i
+      definition.fetch(:responses).each do |status_code, response|
+        actual_status_code = status_code.to_s.to_i
         actual_status_code = 500 if actual_status_code < 100
 
-        content = response.dig("content", "application/json", "schema")
+        content = response.dig(:content, :"application/json", :schema)
         enum_args = "(body)" if content
 
         o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
@@ -345,12 +345,12 @@ def generate_lib_rs(schema, o = STDOUT)
 end
 
 def generate_cargo_toml(schema, name, o = STDOUT)
-  title = schema.dig("info", "title") || "api";
+  title = schema.dig(:info, :title) || "api";
 
   o.puts <<~RUST
     [package]
-    name = #{name.inspect}
-    title = #{title.inspect}
+    name = #{name.to_s.inspect}
+    summary = #{title.to_s.inspect}
     version = "0.1.0"
     edition = "2021"
 
@@ -403,7 +403,7 @@ if ARGV[0] == 'test'
   end
 else
   json = File.read ARGV[0]
-  schema = JSON.parse(json)
+  schema = JSON.parse(json, symbolize_names: true)
 
   dir = ARGV[1]
   raise "usage: #{__FILE__} /path/to/schema.json project_dir" if dir.nil?
