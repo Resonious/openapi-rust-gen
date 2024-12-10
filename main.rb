@@ -277,7 +277,7 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts "    match parts.method {"
   paths_by_method.each do |method, paths|
     o.puts "        Method::#{method.upcase} => {"
-    o.puts "            match #{method.upcase}_ROUTER.at(parts.uri.path()) => {"
+    o.puts "            match #{method.upcase}_ROUTER.at(parts.uri.path()) {"
     o.puts "                Ok(Match { value, params }) => {"
     o.puts "                    match value {"
 
@@ -315,30 +315,29 @@ def generate_lib_rs(schema, o = STDOUT)
 
         o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
         o.puts "                                    let body = \"\";" unless enum_args
-        o.puts "                                    return Response::builder()"
+        o.puts "                                    Response::builder()"
         o.puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
-        o.puts "                                        .body(body.into()).unwrap();"
+        o.puts "                                        .body(body.into()).unwrap()"
         o.puts "                                }"
       end
 
       o.puts "                            }"
       o.puts "                        }"
     end
-
     o.puts "                    }"
-    o.puts "                    Err(MatchError::NotFound) => {"
-    o.puts "                        return Response::builder()"
-    o.puts "                            .status(StatusCode::NOT_FOUND)"
-    o.puts "                            .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap();"
-    o.puts "                    }"
+    o.puts "                }"
+    o.puts "                Err(MatchError::NotFound) => {"
+    o.puts "                    Response::builder()"
+    o.puts "                        .status(StatusCode::NOT_FOUND)"
+    o.puts "                        .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap()"
     o.puts "                }"
     o.puts "            }"
     o.puts "        }"
   end
+  o.puts "        _ => Response::builder()"
+  o.puts "           .status(StatusCode::METHOD_NOT_ALLOWED)"
+  o.puts "           .body(\"\\\"error\\\": \\\"method not allowed\\\"\".into()).unwrap(),"
   o.puts "    }"
-  o.puts "    Response::Builder()"
-  o.puts "        .status(StatusCode::METHOD_NOT_ALLOWED)"
-  o.puts "        .body(\\\"error\\\": \\\"method not allowed\\\".into()).unwrap()"
   o.puts "}"
 end
 
@@ -367,7 +366,7 @@ def generate_cargo_toml(schema, name, o = STDOUT)
 end
 
 def generate_project(schema, name)
-  FileUtils.mkdir(name)
+  FileUtils.mkdir_p(name)
   Dir.chdir name do
     FileUtils.mkdir_p("src")
 
