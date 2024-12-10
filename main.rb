@@ -61,14 +61,14 @@ end
 
 def generate_lib_rs(schema, o = STDOUT)
   o.puts <<~RUST
-    use std::collections::HashMap;
     use async_trait::*;
+    use bytes::Bytes;
     use http::{Method, Request, Response, StatusCode};
     use http_body::Body as HttpBody;
     use http_body_util::BodyExt;
-    use bytes::Bytes;
-    use matchit::{Match, MatchError};
+    use matchit::{Router, Match, MatchError};
     use once_cell::sync::Lazy;
+    use std::{borrow::Cow, collections::HashMap};
     use url::Url;
   RUST
   o.puts
@@ -271,7 +271,10 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts "    };"
   o.puts "    let mut query_pairs = HashMap::new();"
   o.puts "    for (key, value) in url.query_pairs() {"
-  o.puts "        query_pairs.insert(key, value);"
+  o.puts "        query_pairs"
+  o.puts "            .entry(key)"
+  o.puts "            .and_modify(|e: &mut Vec<Cow<'_, str>>| e.push(value))"
+  o.puts "            .or_insert_with(|| vec![value]);"
   o.puts "    }"
   o.puts
   o.puts "    match parts.method {"
