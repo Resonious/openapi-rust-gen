@@ -294,11 +294,16 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
       args = definition.fetch(:parameters, []).map do |parameter|
-        case parameter.fetch(:in)
-        when "path"
-          "params.get(#{parameter.fetch(:name).to_s.inspect}).unwrap(),"
-        when "query"
-          "query_pairs.get(#{parameter.fetch(:name).to_s.inspect}).map(|x| x.to_string()),"
+        case parameter
+        in { in: "path", name: }
+          "params.get(#{name.inspect}).unwrap(),"
+
+        in { in: "query", style: "form", name: }
+          "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect()),"
+
+        in { in: "query", name: }
+          "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string()),"
+
         else
           raise "Unknown parameter source #{parameter[:in].to_s.inspect}"
         end
