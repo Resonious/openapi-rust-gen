@@ -63,7 +63,7 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts <<~RUST
     use async_trait::*;
     use bytes::Bytes;
-    use http::{Method, Request, Response, StatusCode};
+    use http::{HeaderName, Method, Request, Response, StatusCode};
     use http_body::Body as HttpBody;
     use http_body_util::BodyExt;
     use matchit::{Router, Match, MatchError};
@@ -261,21 +261,48 @@ def generate_lib_rs(schema, o = STDOUT)
 
   # HTTP handler
 
-  o.puts "pub async fn handle<A: Api, B: HttpBody>(api: &mut A, request: Request<B>) -> Response<Bytes> {"
-  o.puts "    let (parts, body) = request.into_parts();"
-  o.puts
-  o.puts "    let Ok(url) = Url::parse(&parts.uri.to_string()) else {"
-  o.puts "        return Response::builder()"
-  o.puts "            .status(StatusCode::BAD_REQUEST)"
-  o.puts "            .body(\"{\\\"error\\\":\\\"bad URL\\\"}\".into()).unwrap();"
-  o.puts "    };"
-  o.puts "    let mut query_pairs = HashMap::new();"
-  o.puts "    for (key, value) in url.query_pairs() {"
-  o.puts "        query_pairs"
-  o.puts "            .entry(key)"
-  o.puts "            .and_modify(|e: &mut Vec<Cow<'_, str>>| e.push(value))"
-  o.puts "            .or_insert_with(|| vec![value]);"
-  o.puts "    }"
+  o.puts <<~RUST
+  pub fn response<B: Into<Bytes>>(status: StatusCode, body: B) -> Response<Bytes> {
+      Response::builder()
+          .header(HeaderName::from_static("content-type"), "application/json")
+          .status(status)
+          .body(body.into())
+          .unwrap()
+  }
+
+  pub fn invalid_parameter(message: &str) -> Response<Bytes> {
+      let j = serde_json::json!({
+          "error": "invalid_parameter",
+          "message": message,
+      });
+      let body: Bytes = match serde_json::to_string(&j) {
+          Ok(j_str) => j_str.into(),
+          Err(_) => {
+              "{\\"error\\":\\"invalid_parameter\\",\\"message\\":\\"failed to render full error mesage\\"}"
+                  .into()
+          }
+      };
+
+      response(StatusCode::UNPROCESSABLE_ENTITY, body)
+  }
+
+  pub async fn handle<A: Api, B: HttpBody>(
+      api: &mut A,
+      request: Request<B>,
+  ) -> Response<Bytes> {
+      let (parts, body) = request.into_parts();
+
+      let Ok(url) = Url::parse(&parts.uri.to_string()) else {
+          return response(StatusCode::BAD_REQUEST, "{\\"error\\":\\"bad URL\\"}");
+      };
+      let mut query_pairs = HashMap::new();
+      for (key, value) in url.query_pairs() {
+          query_pairs
+              .entry(key)
+              .and_modify(|e: &mut Vec<Cow<'_, str>>| e.push(value))
+              .or_insert_with(|| vec![value]);
+      }
+  RUST
   o.puts
   o.puts "    match parts.method {"
   paths_by_method.each do |method, paths|
@@ -304,6 +331,9 @@ def generate_lib_rs(schema, o = STDOUT)
         in { in: "query", name: }
           "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string()),"
 
+        # TODO: need to handle non-string types....
+        # probably in both the array case and not array case.
+
         else
           raise "Unknown parameter source #{parameter[:in].to_s.inspect}"
         end
@@ -323,9 +353,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
         o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
         o.puts "                                    let body = \"\";" unless enum_args
-        o.puts "                                    Response::builder()"
-        o.puts "                                        .status(StatusCode::from_u16(#{actual_status_code}).unwrap())"
-        o.puts "                                        .body(body.into()).unwrap()"
+        o.puts "                                    response(StatusCode::from_u16(#{actual_status_code}).unwrap(), body)"
         o.puts "                                }"
       end
 
@@ -335,16 +363,12 @@ def generate_lib_rs(schema, o = STDOUT)
     o.puts "                    }"
     o.puts "                }"
     o.puts "                Err(MatchError::NotFound) => {"
-    o.puts "                    Response::builder()"
-    o.puts "                        .status(StatusCode::NOT_FOUND)"
-    o.puts "                        .body(\"{\\\"error\\\":\\\"path not found\\\"}\".into()).unwrap()"
+    o.puts "                    response(StatusCode::NOT_FOUND, \"{\\\"error\\\":\\\"path not found\\\"}\")"
     o.puts "                }"
     o.puts "            }"
     o.puts "        }"
   end
-  o.puts "        _ => Response::builder()"
-  o.puts "           .status(StatusCode::METHOD_NOT_ALLOWED)"
-  o.puts "           .body(\"\\\"error\\\": \\\"method not allowed\\\"\".into()).unwrap(),"
+  o.puts "        _ => response(StatusCode::METHOD_NOT_ALLOWED, \"\\\"error\\\": \\\"method not allowed\\\"\")"
   o.puts "    }"
   o.puts "}"
 end
