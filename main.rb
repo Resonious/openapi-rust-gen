@@ -321,9 +321,16 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
       args = definition.fetch(:parameters, []).map do |parameter|
+        type = type_of[parameter.fetch(:schema)]
+
         case parameter
         in { in: "path", name: }
-          "params.get(#{name.inspect}).unwrap(),"
+          case type
+          when "String"
+            "params.get(#{name.inspect}).unwrap(),"
+          when /i\d{2}/
+            "match params.get(#{name.inspect}).unwrap().parse() { Ok(x) => x, _ => return invalid_parameter(\"#{name} must be an integer\") },"
+          end
 
         in { in: "query", style: "form", name: }
           "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect()),"
