@@ -330,13 +330,22 @@ def generate_lib_rs(schema, o = STDOUT)
             "params.get(#{name.inspect}).unwrap(),"
           when /i\d{2}/
             "match params.get(#{name.inspect}).unwrap().parse() { Ok(x) => x, _ => return invalid_parameter(\"#{name} must be an integer\") },"
+          else
+            raise "cant hanle #{type.inspect} path param"
           end
 
         in { in: "query", style: "form", name: }
           "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect()),"
 
         in { in: "query", name: }
-          "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string()),"
+          case type
+          when "String"
+            "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string()),"
+          when /i\d{2}/
+            "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") },"
+          else
+            raise "cant hanle #{type.inspect} query param"
+          end
 
         # TODO: need to handle non-string types....
         # probably in both the array case and not array case.
