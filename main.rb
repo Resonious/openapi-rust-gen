@@ -68,7 +68,7 @@ def generate_lib_rs(schema, o = STDOUT)
     use http_body_util::BodyExt;
     use matchit::{Match, MatchError, Router};
     use once_cell::sync::Lazy;
-    use serde::{Deserialize, Serialize};
+    use serde::{de::DeserializeOwned, Deserialize, Serialize};
     use std::{borrow::Cow, collections::HashMap};
     use url::Url;
   RUST
@@ -245,7 +245,7 @@ def generate_lib_rs(schema, o = STDOUT)
         end
       end
 
-      if (request_body = definition["requestBody"])
+      if (request_body = definition[:requestBody])
         content = request_body.dig(:content, :"application/json", :schema)
         fn_def << "        "
         fn_def << "body: " << type_of[content]
@@ -312,6 +312,38 @@ def generate_lib_rs(schema, o = STDOUT)
       )
   }
 
+  pub async fn read_object<B: HttpBody, T: DeserializeOwned>(body: B) -> Result<T, Response<Bytes>> {
+      let body_bytes = match body.collect().await {
+          Ok(result) => result.to_bytes(),
+          Err(e) => {
+              return Err(render_error(
+                  StatusCode::BAD_REQUEST,
+                  "read_failed",
+                  "failed to read body",
+              ));
+          }
+      };
+      let Ok(string) = String::from_utf8(body_bytes.into()) else {
+          return Err(render_error(
+              StatusCode::BAD_REQUEST,
+              "encoding_error",
+              "invalid utf8 in body",
+          ));
+      };
+      let arg = match serde_json::from_str(&string) {
+          Ok(result) => result,
+          Err(e) => {
+              return Err(render_error(
+                  StatusCode::BAD_REQUEST,
+                  "invalid_input",
+                  &format!("body does not conform to schema: {}", e),
+              ));
+          }
+      };
+
+      Ok(arg)
+  }
+
   pub async fn handle<A: Api, B: HttpBody>(
       api: &mut A,
       request: Request<B>,
@@ -374,13 +406,13 @@ def generate_lib_rs(schema, o = STDOUT)
           else
             raise "cant hanle #{type.inspect} query param"
           end
-
-        # TODO: need to handle non-string types....
-        # probably in both the array case and not array case.
-
         else
           raise "Unknown parameter source #{parameter[:in].to_s.inspect}"
         end
+      end
+
+      if (request_body = definition[:requestBody])
+        args << "match read_object(body).await { Ok(x) => x, Err(resp) => return resp }"
       end
 
       o.puts "                            let result = api.#{snake_op_name}(\n"
