@@ -66,8 +66,9 @@ def generate_lib_rs(schema, o = STDOUT)
     use http::{HeaderName, Method, Request, Response, StatusCode};
     use http_body::Body as HttpBody;
     use http_body_util::BodyExt;
-    use matchit::{Router, Match, MatchError};
+    use matchit::{Match, MatchError, Router};
     use once_cell::sync::Lazy;
+    use serde::{Deserialize, Serialize};
     use std::{borrow::Cow, collections::HashMap};
     use url::Url;
   RUST
@@ -163,6 +164,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
   schema.fetch(:components).fetch(:schemas).each do |model, definition|
     if all_of = definition[:allOf]
+      o.puts "#[derive(Serialize, Deserialize)]"
       o.puts "pub struct #{model} {"
       all_of.each(&puts_struct_fields)
       o.puts "}"
@@ -171,6 +173,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
     case definition.fetch(:type)
     when "object"
+      o.puts "#[derive(Serialize, Deserialize)]"
       o.puts "pub struct #{model} {"
       puts_struct_fields[definition]
       o.puts "}"
@@ -270,20 +273,43 @@ def generate_lib_rs(schema, o = STDOUT)
           .unwrap()
   }
 
-  pub fn invalid_parameter(message: &str) -> Response<Bytes> {
+  pub fn render_object<T: Serialize>(status: StatusCode, object: T) -> Response<Bytes> {
+      let body: Bytes = match serde_json::to_string(&object) {
+          Ok(json) => json.into(),
+          Err(e) => {
+              return render_error(
+                  StatusCode::INTERNAL_SERVER_ERROR,
+                  "serialization_failure",
+                  &format!("{e:?}"),
+              )
+          }
+      };
+
+      response(status, body)
+  }
+
+  pub fn render_error(status: StatusCode, error: &str, message: &str) -> Response<Bytes> {
       let j = serde_json::json!({
-          "error": "invalid_parameter",
+          "error": error,
           "message": message,
       });
       let body: Bytes = match serde_json::to_string(&j) {
           Ok(j_str) => j_str.into(),
           Err(_) => {
-              "{\\"error\\":\\"invalid_parameter\\",\\"message\\":\\"failed to render full error mesage\\"}"
+              format!("{{\\"error\\":\\"{error}\\",\\"message\\":\\"failed to render full error mesage\\"}}")
                   .into()
           }
       };
 
-      response(StatusCode::UNPROCESSABLE_ENTITY, body)
+      response(status, body)
+  }
+
+  pub fn invalid_parameter(message: &str) -> Response<Bytes> {
+      render_error(
+          StatusCode::UNPROCESSABLE_ENTITY,
+          "invalid_parameter",
+          message,
+      )
   }
 
   pub async fn handle<A: Api, B: HttpBody>(
@@ -297,10 +323,12 @@ def generate_lib_rs(schema, o = STDOUT)
       };
       let mut query_pairs = HashMap::new();
       for (key, value) in url.query_pairs() {
+          let v1 = value.clone();
+          let v2 = value.clone();
           query_pairs
               .entry(key)
-              .and_modify(|e: &mut Vec<Cow<'_, str>>| e.push(value))
-              .or_insert_with(|| vec![value]);
+              .and_modify(|e: &mut Vec<Cow<'_, str>>| e.push(v1))
+              .or_insert_with(|| vec![v2]);
       }
   RUST
   o.puts
@@ -369,7 +397,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
         o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
         o.puts "                                    let body = \"\";" unless enum_args
-        o.puts "                                    response(StatusCode::from_u16(#{actual_status_code}).unwrap(), body)"
+        o.puts "                                    render_object(StatusCode::from_u16(#{actual_status_code}).unwrap(), body)"
         o.puts "                                }"
       end
 
@@ -379,7 +407,7 @@ def generate_lib_rs(schema, o = STDOUT)
     o.puts "                    }"
     o.puts "                }"
     o.puts "                Err(MatchError::NotFound) => {"
-    o.puts "                    response(StatusCode::NOT_FOUND, \"{\\\"error\\\":\\\"path not found\\\"}\")"
+    o.puts "                    render_error(StatusCode::NOT_FOUND, \"not_found\", &format!(\"{} {} is not a valid endpoint\", parts.method.as_str(), url.path()))"
     o.puts "                }"
     o.puts "            }"
     o.puts "        }"
