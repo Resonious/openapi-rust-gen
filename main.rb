@@ -387,7 +387,7 @@ def generate_lib_rs(schema, o = STDOUT)
         in { in: "path", name: }
           case type
           when "String"
-            "params.get(#{name.inspect}).unwrap(),"
+            "params.get(#{name.inspect}).unwrap().to_string(),"
           when /i\d{2}/
             "match params.get(#{name.inspect}).unwrap().parse() { Ok(x) => x, _ => return invalid_parameter(\"#{name} must be an integer\") },"
           else
