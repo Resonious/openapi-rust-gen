@@ -63,6 +63,27 @@ def operation_name(method, path, definition)
   definition.fetch(:operationId, "#{method} #{path}")
 end
 
+def type_of(prop)
+  if ref = prop[:"$ref"]
+    %r{#/components/schemas/(?<type_name>\w+)} =~ ref
+    raise "??? #{ref}" if type_name.nil?
+    next type_name
+  end
+
+  case prop.fetch(:type)
+  when "string" then next "String"
+  when "integer"
+    case prop.fetch(:format)
+    when "int32" then "i32"
+    when "int64" then "i64"
+    else raise "? #{prop.to_s.inspect}"
+    end
+  when "array" then "Vec<#{type_of[prop.fetch(:items)]}>"
+  else
+    raise "unknown type #{prop.to_s.inspect}"
+  end
+end
+
 def generate_example(schema, name, o = STDOUT)
   o.puts <<~RUST
   struct MyApi;
@@ -142,26 +163,6 @@ def generate_lib_rs(schema, o = STDOUT)
 
   o.puts
 
-  type_of = lambda do |prop|
-    if ref = prop[:"$ref"]
-      %r{#/components/schemas/(?<type_name>\w+)} =~ ref
-      raise "??? #{ref}" if type_name.nil?
-      next type_name
-    end
-
-    case prop.fetch(:type)
-    when "string" then next "String"
-    when "integer"
-      case prop.fetch(:format)
-      when "int32" then "i32"
-      when "int64" then "i64"
-      else raise "? #{prop.to_s.inspect}"
-      end
-    when "array" then "Vec<#{type_of[prop.fetch(:items)]}>"
-    else
-      raise "unknown type #{prop.to_s.inspect}"
-    end
-  end
 
   follow_ref = lambda do |ref|
     value = schema
