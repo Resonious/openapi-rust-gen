@@ -59,6 +59,31 @@ def camelize(*args)
   result_chars.join
 end
 
+def operation_name(method, path, definition)
+  definition.fetch(:operationId, "#{method} #{path}")
+end
+
+def generate_example(schema, name, o = STDOUT)
+  o.puts <<~RUST
+  struct MyApi;
+
+  #[async_trait]
+  impl #{name}::Api for MyApi {
+  RUST
+
+  schema.fetch(:paths).each do |path, methods|
+    methods.each do |method, definition|
+      op_name = operation_name(method, path, definition)
+      camel_op_name = camelize(op_name)
+      snake_op_name = snakeize(op_name)
+
+      o.puts "async fn #{snake_op_name}()"
+    end
+  end
+
+  o.puts "}"
+end
+
 def generate_lib_rs(schema, o = STDOUT)
   o.puts <<~RUST
     use async_trait::*;
@@ -158,13 +183,13 @@ def generate_lib_rs(schema, o = STDOUT)
     definition.fetch(:properties).each do |key, prop|
       type = type_of[prop]
       type = "Option<#{type}>" unless required[key]
-      o.puts "    #{key}: #{type},"
+      o.puts "    pub #{key}: #{type},"
     end
   end
 
   schema.fetch(:components).fetch(:schemas).each do |model, definition|
     if all_of = definition[:allOf]
-      o.puts "#[derive(Serialize, Deserialize)]"
+      o.puts "#[derive(Serialize, Deserialize, Default)]"
       o.puts "pub struct #{model} {"
       all_of.each(&puts_struct_fields)
       o.puts "}"
@@ -173,7 +198,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
     case definition.fetch(:type)
     when "object"
-      o.puts "#[derive(Serialize, Deserialize)]"
+      o.puts "#[derive(Serialize, Deserialize, Default)]"
       o.puts "pub struct #{model} {"
       puts_struct_fields[definition]
       o.puts "}"
@@ -184,10 +209,6 @@ def generate_lib_rs(schema, o = STDOUT)
   end
 
   o.puts
-
-  operation_name = lambda do |method, path, definition|
-    definition[:operationId] || "#{method} #{path}"
-  end
 
   # request/response objects
   response_enum_name = lambda do |status_code, response|
@@ -200,7 +221,7 @@ def generate_lib_rs(schema, o = STDOUT)
 
   schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
-      op_name = camelize(operation_name[method, path, definition])
+      op_name = camelize(operation_name(method, path, definition))
 
       o.puts "pub enum #{op_name}Response {"
       definition.fetch(:responses).each do |status_code, response|
@@ -223,7 +244,7 @@ def generate_lib_rs(schema, o = STDOUT)
   functions = []
   schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
-      op_name = operation_name[method, path, definition]
+      op_name = operation_name(method, path, definition)
       camel_op_name = camelize(op_name)
       snake_op_name = snakeize(op_name)
 
@@ -235,6 +256,9 @@ def generate_lib_rs(schema, o = STDOUT)
         "        &mut self,\n"
       ]
 
+      # TODO: if we really want example generation, this will need to
+      # be factored out so that I can get the full def in the example
+      # generator...........
       definition.fetch(:parameters, []).each do |parameter|
         fn_def << "        "
         fn_def << snakeize(parameter.fetch(:name)) << ": "
@@ -374,7 +398,7 @@ def generate_lib_rs(schema, o = STDOUT)
     paths.each do |path|
       definition = schema.dig(:paths, path, method)
       raise "No def at #{method} #{path} ????" if definition.nil?
-      op_name = operation_name[method, path, definition]
+      op_name = operation_name(method, path, definition)
       camel_op_name = camelize(op_name)
       snake_op_name = snakeize(op_name)
 

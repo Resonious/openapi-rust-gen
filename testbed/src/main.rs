@@ -9,7 +9,7 @@ use hyper::service::service_fn;
 use http::{Request, Response};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
-use testgen::{Api, handle};
+use tzt::{handle, Api, ListPetsResponse};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -44,11 +44,10 @@ struct MyApi;
 
 #[async_trait]
 impl Api for MyApi {
-    async fn get_pets(&self) -> String {
-        "hog".to_string()
-    }
-    async fn post_pets(&self, input: String) -> String {
-        format!("go {input}").to_string()
+    async fn list_pets(&mut self, page: Option<i32>) -> ListPetsResponse {
+        ListPetsResponse::Http200(vec![
+                                  Default::default()
+        ])
     }
 }
 
