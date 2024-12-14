@@ -67,18 +67,18 @@ def type_of(prop)
   if ref = prop[:"$ref"]
     %r{#/components/schemas/(?<type_name>\w+)} =~ ref
     raise "??? #{ref}" if type_name.nil?
-    next type_name
+    return type_name
   end
 
   case prop.fetch(:type)
-  when "string" then next "String"
+  when "string" then "String"
   when "integer"
     case prop.fetch(:format)
     when "int32" then "i32"
     when "int64" then "i64"
     else raise "? #{prop.to_s.inspect}"
     end
-  when "array" then "Vec<#{type_of[prop.fetch(:items)]}>"
+  when "array" then "Vec<#{type_of(prop.fetch(:items))}>"
   else
     raise "unknown type #{prop.to_s.inspect}"
   end
@@ -182,7 +182,7 @@ def generate_lib_rs(schema, o = STDOUT)
     definition.fetch(:required, []).each { |field| required[field] = true }
 
     definition.fetch(:properties).each do |key, prop|
-      type = type_of[prop]
+      type = type_of(prop)
       type = "Option<#{type}>" unless required[key]
       o.puts "    pub #{key}: #{type},"
     end
@@ -205,7 +205,7 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "}"
     when "array"
       items = definition.fetch(:items)
-      o.puts "type #{model} = Vec<#{type_of[items]}>;"
+      o.puts "type #{model} = Vec<#{type_of(items)}>;"
     end
   end
 
@@ -227,7 +227,7 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "pub enum #{op_name}Response {"
       definition.fetch(:responses).each do |status_code, response|
         content = response.dig(:content, :"application/json", :schema)
-        type = type_of[content] if content
+        type = type_of(content) if content
         enum_args = "(#{type})" if type
 
         o.puts "    #{response_enum_name[status_code, response]}#{enum_args},"
@@ -265,15 +265,15 @@ def generate_lib_rs(schema, o = STDOUT)
         fn_def << snakeize(parameter.fetch(:name)) << ": "
 
         case parameter.fetch(:in)
-        when "path" then fn_def << type_of[parameter.fetch(:schema)] << ",\n"
-        when "query" then fn_def << "Option<" << type_of[parameter.fetch(:schema)] << ">,\n"
+        when "path" then fn_def << type_of(parameter.fetch(:schema)) << ",\n"
+        when "query" then fn_def << "Option<" << type_of(parameter.fetch(:schema)) << ">,\n"
         end
       end
 
       if (request_body = definition[:requestBody])
         content = request_body.dig(:content, :"application/json", :schema)
         fn_def << "        "
-        fn_def << "body: " << type_of[content]
+        fn_def << "body: " << type_of(content)
         fn_def << ",\n"
       end
 
@@ -406,7 +406,7 @@ def generate_lib_rs(schema, o = STDOUT)
       o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
       args = definition.fetch(:parameters, []).map do |parameter|
-        type = type_of[parameter.fetch(:schema)]
+        type = type_of(parameter.fetch(:schema))
 
         case parameter
         in { in: "path", name: }
