@@ -63,6 +63,48 @@ def operation_name(method, path, definition)
   definition.fetch(:operationId, "#{method} #{path}")
 end
 
+def response_enum_name(status_code, response)
+  if status_code =~ /^\d/
+    camelize("Http #{status_code}")
+  else
+    camelize(status_code)
+  end
+end
+
+def fn_def(method, path, definition)
+  op_name = operation_name(method, path, definition)
+  camel_op_name = camelize(op_name)
+  snake_op_name = snakeize(op_name)
+
+  result = [
+    "    ",
+    "async fn ",
+    snake_op_name,
+    "(\n",
+    "        &mut self,\n"
+  ]
+
+  definition.fetch(:parameters, []).each do |parameter|
+    result << "        "
+    result << snakeize(parameter.fetch(:name)) << ": "
+
+    case parameter.fetch(:in)
+    when "path" then result << type_of(parameter.fetch(:schema)) << ",\n"
+    when "query" then result << "Option<" << type_of(parameter.fetch(:schema)) << ">,\n"
+    end
+  end
+
+  if (request_body = definition[:requestBody])
+    content = request_body.dig(:content, :"application/json", :schema)
+    result << "        "
+    result << "body: " << type_of(content)
+    result << ",\n"
+  end
+
+  result << "    ) -> " << camel_op_name << "Response"
+  result.join
+end
+
 def type_of(prop)
   if ref = prop[:"$ref"]
     %r{#/components/schemas/(?<type_name>\w+)} =~ ref
@@ -94,11 +136,19 @@ def generate_example(schema, name, o = STDOUT)
 
   schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
-      op_name = operation_name(method, path, definition)
-      camel_op_name = camelize(op_name)
-      snake_op_name = snakeize(op_name)
+      o.puts fn_def(method, path, definition) + " {"
 
-      o.puts "async fn #{snake_op_name}()"
+      status_code, response = definition.fetch(:responses).each.next
+      content = response.dig(:content, :"application/json", :schema)
+
+      camel_op_name = camelize(operation_name(method, path, definition))
+
+      line = [camel_op_name, "Response::", response_enum_name(status_code, response)]
+      line << "(Default::default())" if content
+
+      o.puts "        #{line.join}"
+
+      o.puts "    }"
     end
   end
 
@@ -212,14 +262,6 @@ def generate_lib_rs(schema, o = STDOUT)
   o.puts
 
   # request/response objects
-  response_enum_name = lambda do |status_code, response|
-    if status_code =~ /^\d/
-      camelize("Http #{status_code}")
-    else
-      camelize(status_code)
-    end
-  end
-
   schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
       op_name = camelize(operation_name(method, path, definition))
@@ -230,7 +272,7 @@ def generate_lib_rs(schema, o = STDOUT)
         type = type_of(content) if content
         enum_args = "(#{type})" if type
 
-        o.puts "    #{response_enum_name[status_code, response]}#{enum_args},"
+        o.puts "    #{response_enum_name(status_code, response)}#{enum_args},"
       end
       o.puts "}"
     end
@@ -245,41 +287,7 @@ def generate_lib_rs(schema, o = STDOUT)
   functions = []
   schema.fetch(:paths).each do |path, methods|
     methods.each do |method, definition|
-      op_name = operation_name(method, path, definition)
-      camel_op_name = camelize(op_name)
-      snake_op_name = snakeize(op_name)
-
-      fn_def = [
-        "    ",
-        "async fn ",
-        snake_op_name,
-        "(\n",
-        "        &mut self,\n"
-      ]
-
-      # TODO: if we really want example generation, this will need to
-      # be factored out so that I can get the full def in the example
-      # generator...........
-      definition.fetch(:parameters, []).each do |parameter|
-        fn_def << "        "
-        fn_def << snakeize(parameter.fetch(:name)) << ": "
-
-        case parameter.fetch(:in)
-        when "path" then fn_def << type_of(parameter.fetch(:schema)) << ",\n"
-        when "query" then fn_def << "Option<" << type_of(parameter.fetch(:schema)) << ">,\n"
-        end
-      end
-
-      if (request_body = definition[:requestBody])
-        content = request_body.dig(:content, :"application/json", :schema)
-        fn_def << "        "
-        fn_def << "body: " << type_of(content)
-        fn_def << ",\n"
-      end
-
-      fn_def << "    ) -> " << camel_op_name << "Response;"
-
-      functions << fn_def.join
+      functions << fn_def(method, path, definition) + ';'
     end
   end
   o.puts functions.join("\n\n")
@@ -452,7 +460,7 @@ def generate_lib_rs(schema, o = STDOUT)
         content = response.dig(:content, :"application/json", :schema)
         enum_args = "(body)" if content
 
-        o.puts "                                #{camel_op_name}Response::#{response_enum_name[status_code, response]}#{enum_args} => {"
+        o.puts "                                #{camel_op_name}Response::#{response_enum_name(status_code, response)}#{enum_args} => {"
         o.puts "                                    let body = \"\";" unless enum_args
         o.puts "                                    render_object(StatusCode::from_u16(#{actual_status_code}).unwrap(), body)"
         o.puts "                                }"
@@ -509,6 +517,7 @@ def generate_project(schema, name)
 
     File.open("src/lib.rs", "w") do |lib_rs|
       generate_lib_rs schema, lib_rs
+      generate_example schema, "crate", lib_rs
     end
   end
 end
