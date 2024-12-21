@@ -150,7 +150,7 @@ class OpenApiRustGenerator
         "String"
       end
     when "integer"
-      case prop.fetch(:format)
+      case prop.fetch(:format, "int64")
       when "int32" then "i32"
       when "int64" then "i64"
       else raise "? #{prop.to_s.inspect}"
