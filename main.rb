@@ -5,6 +5,7 @@ class OpenApiRustGenerator
   def initialize(schema)
     @schema = schema
     @paths_by_method = collect_paths_by_method
+    @lazy_defs = {}
   end
 
   def self.upper?(c) = c.upcase == c
@@ -65,6 +66,9 @@ class OpenApiRustGenerator
     result_chars.join
   end
 
+  def camelize(*args) = self.class.camelize(*args)
+  def snakeize(*args) = self.class.snakeize(*args)
+
   def generate_project(name)
     FileUtils.mkdir_p(name)
     Dir.chdir name do
@@ -115,7 +119,7 @@ class OpenApiRustGenerator
     value
   end
 
-  def puts_struct_fields(output, definition)
+  def puts_struct_fields(output, definition, type_name_prefix)
     while ref = definition[:"$ref"]
       definition = follow_ref(ref)
     end
@@ -124,13 +128,13 @@ class OpenApiRustGenerator
     definition.fetch(:required, []).each { |field| required[field] = true }
 
     definition.fetch(:properties).each do |key, prop|
-      type = type_of(prop)
+      type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
       type = "Option<#{type}>" unless required[key]
       output.puts "    pub #{key}: #{type},"
     end
   end
 
-  def type_of(prop)
+  def type_of(prop, type_name_if_definition_needed)
     if ref = prop[:"$ref"]
       %r{#/components/schemas/(?<type_name>\w+)} =~ ref
       raise "??? #{ref}" if type_name.nil?
@@ -138,14 +142,23 @@ class OpenApiRustGenerator
     end
 
     case prop.fetch(:type)
-    when "string" then "String"
+    when "string"
+      if enum = prop[:enum]
+        @lazy_defs[type_name_if_definition_needed] ||= prop
+        type_name_if_definition_needed
+      else
+        "String"
+      end
     when "integer"
       case prop.fetch(:format)
       when "int32" then "i32"
       when "int64" then "i64"
       else raise "? #{prop.to_s.inspect}"
       end
-    when "array" then "Vec<#{type_of(prop.fetch(:items))}>"
+    when "array" then "Vec<#{type_of(prop.fetch(:items), "#{type_name_if_definition_needed}Item")}>"
+    when "object"
+      @lazy_defs[type_name_if_definition_needed] ||= prop
+      type_name_if_definition_needed
     else
       raise "unknown type #{prop.to_s.inspect}"
     end
@@ -168,16 +181,19 @@ class OpenApiRustGenerator
       result << "        "
       result << self.class.snakeize(parameter.fetch(:name)) << ": "
 
+      type_name = camelize("#{op_name} #{parameter.fetch(:name)}")
+
       case parameter.fetch(:in)
-      when "path" then result << type_of(parameter.fetch(:schema)) << ",\n"
-      when "query" then result << "Option<" << type_of(parameter.fetch(:schema)) << ">,\n"
+      when "path" then result << type_of(parameter.fetch(:schema), type_name) << ",\n"
+      when "query" then result << "Option<" << type_of(parameter.fetch(:schema), type_name) << ">,\n"
       end
     end
 
     if (request_body = definition[:requestBody])
+      type_name = camelize("#{op_name} body")
       content = request_body.dig(:content, :"application/json", :schema)
       result << "        "
-      result << "body: " << type_of(content)
+      result << "body: " << type_of(content, type_name)
       result << ",\n"
     end
 
@@ -255,7 +271,7 @@ class OpenApiRustGenerator
       if all_of = definition[:allOf]
         o.puts "#[derive(Serialize, Deserialize, Default)]"
         o.puts "pub struct #{model} {"
-        all_of.each { |d| puts_struct_fields(o, d) }
+        all_of.each { |d| puts_struct_fields(o, d, model) }
         o.puts "}"
         next
       end
@@ -264,11 +280,11 @@ class OpenApiRustGenerator
       when "object"
         o.puts "#[derive(Serialize, Deserialize, Default)]"
         o.puts "pub struct #{model} {"
-        puts_struct_fields(o, definition)
+        puts_struct_fields(o, definition, model)
         o.puts "}"
       when "array"
         items = definition.fetch(:items)
-        o.puts "type #{model} = Vec<#{type_of(items)}>;"
+        o.puts "type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
       end
     end
 
@@ -278,10 +294,12 @@ class OpenApiRustGenerator
       methods.each do |method, definition|
         op_name = self.class.camelize(operation_name(method, path, definition))
 
-        o.puts "pub enum #{op_name}Response {"
+        type_name = "#{op_name}Response"
+
+        o.puts "pub enum #{type_name} {"
         definition.fetch(:responses).each do |status_code, response|
           content = response.dig(:content, :"application/json", :schema)
-          type = type_of(content) if content
+          type = type_of(content, "#{type_name}#{response_enum_name(status_code, response)}") if content
           enum_args = "(#{type})" if type
 
           o.puts "    #{response_enum_name(status_code, response)}#{enum_args},"
@@ -422,7 +440,8 @@ class OpenApiRustGenerator
         o.puts "                        #{self.class.camelize(method)}Path::#{self.class.camelize(path)} => {"
 
         args = definition.fetch(:parameters, []).map do |parameter|
-          type = type_of(parameter.fetch(:schema))
+          type_name = camelize("#{op_name} #{parameter.fetch(:name)}")
+          type = type_of(parameter.fetch(:schema), type_name)
 
           case parameter
           in { in: "path", name: }
@@ -488,6 +507,29 @@ class OpenApiRustGenerator
     o.puts "        _ => response(StatusCode::METHOD_NOT_ALLOWED, \"\\\"error\\\": \\\"method not allowed\\\"\")"
     o.puts "    }"
     o.puts "}"
+
+    until @lazy_defs.empty?
+      defs = @lazy_defs.dup
+      @lazy_defs = {}
+      defs.each do |type_name, definition|
+        o.puts
+
+        if definition[:type] == "object"
+          o.puts "#[derive(Serialize, Deserialize, Default)]"
+          o.puts "pub struct #{type_name} {"
+          puts_struct_fields(o, definition, type_name)
+          o.puts "}"
+        elsif (enum = definition[:enum])
+          o.puts "#[derive(Serialize, Deserialize, Default)]"
+          o.puts "pub enum #{type_name} {"
+          enum.each do |item|
+            # TODO: specify serde name!!!
+            o.puts "    #{camelize(item)},"
+          end
+          o.puts "}"
+        end
+      end
+    end
   end
 
   def generate_cargo_toml(name, output)
