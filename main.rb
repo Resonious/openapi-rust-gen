@@ -129,7 +129,7 @@ class OpenApiRustGenerator
 
     definition.fetch(:properties).each do |key, prop|
       type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
-      type = "Option<#{type}>" unless required[key]
+      type = "Option<#{type}>" unless required[key.to_s]
       output.puts "    pub #{key}: #{type},"
     end
   end
@@ -269,7 +269,7 @@ class OpenApiRustGenerator
 
     @schema.fetch(:components).fetch(:schemas).each do |model, definition|
       if all_of = definition[:allOf]
-        o.puts "#[derive(Serialize, Deserialize, Default)]"
+        o.puts "#[derive(Serialize, Deserialize)]"
         o.puts "pub struct #{model} {"
         all_of.each { |d| puts_struct_fields(o, d, model) }
         o.puts "}"
@@ -278,7 +278,7 @@ class OpenApiRustGenerator
 
       case definition.fetch(:type)
       when "object"
-        o.puts "#[derive(Serialize, Deserialize, Default)]"
+        o.puts "#[derive(Serialize, Deserialize)]"
         o.puts "pub struct #{model} {"
         puts_struct_fields(o, definition, model)
         o.puts "}"
@@ -515,15 +515,15 @@ class OpenApiRustGenerator
         o.puts
 
         if definition[:type] == "object"
-          o.puts "#[derive(Serialize, Deserialize, Default)]"
+          o.puts "#[derive(Serialize, Deserialize)]"
           o.puts "pub struct #{type_name} {"
           puts_struct_fields(o, definition, type_name)
           o.puts "}"
         elsif (enum = definition[:enum])
-          o.puts "#[derive(Serialize, Deserialize, Default)]"
+          o.puts "#[derive(Serialize, Deserialize)]"
           o.puts "pub enum #{type_name} {"
           enum.each do |item|
-            # TODO: specify serde name!!!
+            o.puts "    #[serde(rename = #{item.to_s.inspect})]"
             o.puts "    #{camelize(item)},"
           end
           o.puts "}"
