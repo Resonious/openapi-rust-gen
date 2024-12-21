@@ -245,6 +245,7 @@ class OpenApiRustGenerator
     RUST
     o.puts
 
+    # Matchit result enums for each HTTP method.
     @paths_by_method.each do |method, paths|
       o.puts "pub enum #{self.class.camelize(method)}Path {"
       paths.each do |path|
@@ -255,6 +256,7 @@ class OpenApiRustGenerator
 
     o.puts
 
+    # Matchit routers for each HTTP method.
     @paths_by_method.each do |method, paths|
       o.puts "static #{self.class.snakeize(method).upcase}_ROUTER: Lazy<Router<#{self.class.camelize(method)}Path>> = Lazy::new(|| {"
       o.puts "    let mut router = Router::new();"
@@ -267,6 +269,7 @@ class OpenApiRustGenerator
 
     o.puts
 
+    # Create structs for all components.
     @schema.fetch(:components).fetch(:schemas).each do |model, definition|
       if all_of = definition[:allOf]
         o.puts "#[derive(Serialize, Deserialize)]"
@@ -290,6 +293,7 @@ class OpenApiRustGenerator
 
     o.puts
 
+    # pub enum GetAbcResponse { Http200(...), ... }
     @schema.fetch(:paths).each do |path, methods|
       methods.each do |method, definition|
         op_name = self.class.camelize(operation_name(method, path, definition))
@@ -310,6 +314,7 @@ class OpenApiRustGenerator
 
     o.puts
 
+    # Api trait that users of the generated library must implement.
     o.puts "#[async_trait]"
     o.puts "pub trait Api {"
     functions = []
@@ -323,6 +328,7 @@ class OpenApiRustGenerator
 
     o.puts
 
+    # Now we will generate all helper functions and the handler.
     o.puts <<~RUST
     pub fn response<B: Into<Bytes>>(status: StatusCode, body: B) -> Response<Bytes> {
         Response::builder()
@@ -508,6 +514,11 @@ class OpenApiRustGenerator
     o.puts "    }"
     o.puts "}"
 
+    similar_enums = {}
+
+    # Lazy defs are inline structs and enums. Rust requires all
+    # structs and enums to have a name, and so we pick these up
+    # whenever type_of gets called on such an inline type.
     until @lazy_defs.empty?
       defs = @lazy_defs.dup
       @lazy_defs = {}
@@ -520,6 +531,10 @@ class OpenApiRustGenerator
           puts_struct_fields(o, definition, type_name)
           o.puts "}"
         elsif (enum = definition[:enum])
+          enum_key = enum.sort.inspect
+          similar_enums[enum_key] ||= []
+          similar_enums[enum_key] << [type_name, definition]
+
           o.puts "#[derive(Serialize, Deserialize)]"
           o.puts "pub enum #{type_name} {"
           enum.each do |item|
@@ -528,6 +543,30 @@ class OpenApiRustGenerator
           end
           o.puts "}"
         end
+      end
+    end
+
+    # Generate "impl From"s for duplicate enums.
+    # Duplicate enums happen when you have an inline enum field
+    # in a ref that gets used with all_of.
+    # It could also just be multiple enums with the same fields.
+    similar_enums.each do |key, definitions|
+      next if definitions.size <= 1
+      definitions.permutation(2).each do |a, b|
+        a_type, a_def = a
+        b_type, b_def = b
+
+        o.puts
+        o.puts "impl From<#{a_type}> for #{b_type} {"
+        o.puts "    fn from(value: #{a_type}) -> Self {"
+        o.puts "        match value {"
+        a_def.fetch(:enum).each do |item|
+          item = camelize(item)
+          o.puts "            #{a_type}::#{item} => Self::#{item},"
+        end
+        o.puts "        }"
+        o.puts "    }"
+        o.puts "}"
       end
     end
   end
