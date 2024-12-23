@@ -80,7 +80,7 @@ class OpenApiRustGenerator
 
       File.open("src/lib.rs", "w") do |lib_rs|
         generate_lib_rs(lib_rs)
-        generate_example("crate", lib_rs)
+        # generate_example("crate", lib_rs)
       end
     end
   end
