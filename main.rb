@@ -104,9 +104,9 @@ class OpenApiRustGenerator
 
   def response_enum_name(status_code, response)
     if status_code =~ /^\d/
-      self.class.camelize("Http #{status_code}")
+      camelize("Http #{status_code}")
     else
-      self.class.camelize(status_code)
+      camelize(status_code)
     end
   end
 
@@ -166,8 +166,8 @@ class OpenApiRustGenerator
 
   def fn_def(method, path, definition)
     op_name = operation_name(method, path, definition)
-    camel_op_name = self.class.camelize(op_name)
-    snake_op_name = self.class.snakeize(op_name)
+    camel_op_name = camelize(op_name)
+    snake_op_name = snakeize(op_name)
 
     result = [
       "    ",
@@ -179,7 +179,7 @@ class OpenApiRustGenerator
 
     definition.fetch(:parameters, []).each do |parameter|
       result << "        "
-      result << self.class.snakeize(parameter.fetch(:name)) << ": "
+      result << snakeize(parameter.fetch(:name)) << ": "
 
       type_name = camelize("#{op_name} #{parameter.fetch(:name)}")
 
@@ -216,7 +216,7 @@ class OpenApiRustGenerator
         status_code, response = definition.fetch(:responses).each.next
         content = response.dig(:content, :"application/json", :schema)
 
-        camel_op_name = self.class.camelize(operation_name(method, path, definition))
+        camel_op_name = camelize(operation_name(method, path, definition))
 
         line = [camel_op_name, "Response::", response_enum_name(status_code, response)]
         line << "(Default::default())" if content
@@ -247,9 +247,9 @@ class OpenApiRustGenerator
 
     # Matchit result enums for each HTTP method.
     @paths_by_method.each do |method, paths|
-      o.puts "pub enum #{self.class.camelize(method)}Path {"
+      o.puts "pub enum #{camelize(method)}Path {"
       paths.each do |path|
-        o.puts "    #{self.class.camelize(path)},"
+        o.puts "    #{camelize(path)},"
       end
       o.puts "}"
     end
@@ -258,10 +258,10 @@ class OpenApiRustGenerator
 
     # Matchit routers for each HTTP method.
     @paths_by_method.each do |method, paths|
-      o.puts "static #{self.class.snakeize(method).upcase}_ROUTER: Lazy<Router<#{self.class.camelize(method)}Path>> = Lazy::new(|| {"
+      o.puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
       o.puts "    let mut router = Router::new();"
       paths.each do |path|
-        o.puts "    router.insert(#{path.to_s.inspect}, #{self.class.camelize(method)}Path::#{self.class.camelize(path)}).unwrap();"
+        o.puts "    router.insert(#{path.to_s.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
       end
       o.puts "    router"
       o.puts "});"
@@ -296,7 +296,7 @@ class OpenApiRustGenerator
     # pub enum GetAbcResponse { Http200(...), ... }
     @schema.fetch(:paths).each do |path, methods|
       methods.each do |method, definition|
-        op_name = self.class.camelize(operation_name(method, path, definition))
+        op_name = camelize(operation_name(method, path, definition))
 
         type_name = "#{op_name}Response"
 
@@ -440,10 +440,10 @@ class OpenApiRustGenerator
         definition = @schema.dig(:paths, path, method)
         raise "No def at #{method} #{path} ????" if definition.nil?
         op_name = operation_name(method, path, definition)
-        camel_op_name = self.class.camelize(op_name)
-        snake_op_name = self.class.snakeize(op_name)
+        camel_op_name = camelize(op_name)
+        snake_op_name = snakeize(op_name)
 
-        o.puts "                        #{self.class.camelize(method)}Path::#{self.class.camelize(path)} => {"
+        o.puts "                        #{camelize(method)}Path::#{camelize(path)} => {"
 
         args = definition.fetch(:parameters, []).map do |parameter|
           type_name = camelize("#{op_name} #{parameter.fetch(:name)}")
