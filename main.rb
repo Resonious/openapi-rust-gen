@@ -272,7 +272,7 @@ class OpenApiRustGenerator
     # Create structs for all components.
     @schema.fetch(:components).fetch(:schemas).each do |model, definition|
       if all_of = definition[:allOf]
-        o.puts "#[derive(Serialize, Deserialize)]"
+        o.puts "#[derive(Serialize, Deserialize, Debug)]"
         o.puts "pub struct #{model} {"
         all_of.each { |d| puts_struct_fields(o, d, model) }
         o.puts "}"
@@ -281,7 +281,7 @@ class OpenApiRustGenerator
 
       case definition.fetch(:type)
       when "object"
-        o.puts "#[derive(Serialize, Deserialize)]"
+        o.puts "#[derive(Serialize, Deserialize, Debug)]"
         o.puts "pub struct #{model} {"
         puts_struct_fields(o, definition, model)
         o.puts "}"
@@ -526,7 +526,7 @@ class OpenApiRustGenerator
         o.puts
 
         if definition[:type] == "object"
-          o.puts "#[derive(Serialize, Deserialize)]"
+          o.puts "#[derive(Serialize, Deserialize, Debug)]"
           o.puts "pub struct #{type_name} {"
           puts_struct_fields(o, definition, type_name)
           o.puts "}"
@@ -535,7 +535,7 @@ class OpenApiRustGenerator
           similar_enums[enum_key] ||= []
           similar_enums[enum_key] << [type_name, definition]
 
-          o.puts "#[derive(Serialize, Deserialize)]"
+          o.puts "#[derive(Serialize, Deserialize, Debug)]"
           o.puts "pub enum #{type_name} {"
           enum.each do |item|
             o.puts "    #[serde(rename = #{item.to_s.inspect})]"
