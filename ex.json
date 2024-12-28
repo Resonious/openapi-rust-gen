@@ -184,6 +184,34 @@
           }
         }
       }
+    },
+    "/pets/{id}/upload": {
+      "put": {
+        "description": "uploads an image to pet",
+        "operationId": "upload",
+        "requestBody": {
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "pet response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

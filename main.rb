@@ -173,6 +173,9 @@ class OpenApiRustGenerator
       "    ",
       "async fn ",
       snake_op_name,
+    ]
+    type_param_index = result.size
+    result += [
       "(\n",
       "        &mut self,\n"
     ]
@@ -190,11 +193,15 @@ class OpenApiRustGenerator
     end
 
     if (request_body = definition[:requestBody])
-      type_name = camelize("#{op_name} body")
-      content = request_body.dig(:content, :"application/json", :schema)
-      result << "        "
-      result << "body: " << type_of(content, type_name)
-      result << ",\n"
+      if (json_content = request_body.dig(:content, :"application/json", :schema))
+        type_name = camelize("#{op_name} body")
+        result << "        "
+        result << "body: " << type_of(json_content, type_name)
+        result << ",\n"
+      else
+        result.insert type_param_index, "<B: HttpBody>"
+        result << "        body: B,\n"
+      end
     end
 
     result << "    ) -> " << camel_op_name << "Response"
@@ -478,7 +485,11 @@ class OpenApiRustGenerator
         end
 
         if (request_body = definition[:requestBody])
-          args << "match read_object(body).await { Ok(x) => x, Err(resp) => return resp }"
+          if (request_body.dig(:content, :"application/json", :schema))
+            args << "match read_object(body).await { Ok(x) => x, Err(resp) => return resp }"
+          else
+            args << "body"
+          end
         end
 
         o.puts "                            let result = api.#{snake_op_name}(\n"
