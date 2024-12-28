@@ -1,4 +1,5 @@
 require "json"
+require "yaml"
 require "debug"
 
 class OpenApiRustGenerator
@@ -80,8 +81,9 @@ class OpenApiRustGenerator
 
       File.open("src/lib.rs", "w") do |lib_rs|
         generate_lib_rs(lib_rs)
-        # generate_example("crate", lib_rs)
       end
+
+      generate_example("crate", STDOUT)
     end
   end
 
@@ -177,7 +179,7 @@ class OpenApiRustGenerator
     type_param_index = result.size
     result += [
       "(\n",
-      "        &mut self,\n"
+      "        self,\n"
     ]
 
     definition.fetch(:parameters, []).each do |parameter|
@@ -199,12 +201,17 @@ class OpenApiRustGenerator
         result << "body: " << type_of(json_content, type_name)
         result << ",\n"
       else
-        result.insert type_param_index, "<B: HttpBody>"
+        type_param = true
+        result.insert type_param_index, "<B>"
         result << "        body: B,\n"
       end
     end
 
     result << "    ) -> " << camel_op_name << "Response"
+    if type_param
+      result << "\n        where B: http_body::Body + Send\n   "
+    else
+    end
     result.join
   end
 
@@ -226,7 +233,7 @@ class OpenApiRustGenerator
         camel_op_name = camelize(operation_name(method, path, definition))
 
         line = [camel_op_name, "Response::", response_enum_name(status_code, response)]
-        line << "(Default::default())" if content
+        line << "(todo!())" if content
 
         o.puts "        #{line.join}"
 
@@ -242,7 +249,6 @@ class OpenApiRustGenerator
       use async_trait::*;
       use bytes::Bytes;
       use http::{HeaderName, Method, Request, Response, StatusCode};
-      use http_body::Body as HttpBody;
       use http_body_util::BodyExt;
       use matchit::{Match, MatchError, Router};
       use once_cell::sync::Lazy;
@@ -384,7 +390,9 @@ class OpenApiRustGenerator
         )
     }
 
-    pub async fn read_object<B: HttpBody, T: DeserializeOwned>(body: B) -> Result<T, Response<Bytes>> {
+    pub async fn read_object<B, T>(body: B) -> Result<T, Response<Bytes>>
+        where B: http_body::Body + Send, T: DeserializeOwned
+    {
         let body_bytes = match body.collect().await {
             Ok(result) => result.to_bytes(),
             Err(e) => {
@@ -416,10 +424,12 @@ class OpenApiRustGenerator
         Ok(arg)
     }
 
-    pub async fn handle<A: Api, B: HttpBody>(
-        api: &mut A,
+    pub async fn handle<A, B>(
+        api: A,
         request: Request<B>,
-    ) -> Response<Bytes> {
+    ) -> Response<Bytes>
+        where A: Api, B: http_body::Body + Send
+    {
         let (parts, body) = request.into_parts();
 
         let Ok(url) = Url::parse(&parts.uri.to_string()) else {
@@ -521,7 +531,7 @@ class OpenApiRustGenerator
       o.puts "            }"
       o.puts "        }"
     end
-    o.puts "        _ => response(StatusCode::METHOD_NOT_ALLOWED, \"\\\"error\\\": \\\"method not allowed\\\"\")"
+    o.puts "        _ => response(StatusCode::METHOD_NOT_ALLOWED, \"{\\\"error\\\": \\\"method not allowed\\\"}\")"
     o.puts "    }"
     o.puts "}"
 
@@ -623,13 +633,21 @@ if ARGV[0] == 'test'
     end
   end
 else
-  json = File.read ARGV[0]
-  schema = JSON.parse(json, symbolize_names: true)
+  if ARGV[0].end_with?(".yaml", ".yml")
+    schema = YAML.load_file(ARGV[0], symbolize_names: true)
+  elsif ARGV[0].end_with?(".json")
+    json = File.read ARGV[0]
+    schema = JSON.parse(json, symbolize_names: true)
+  else
+    raise "Unknown file type. Expected .json, .yaml, or .yml"
+  end
 
   dir = ARGV[1]
   raise "usage: #{__FILE__} /path/to/schema.json project_dir" if dir.nil?
 
   generator = OpenApiRustGenerator.new(schema)
   generator.generate_project(dir)
-  puts "Done."
+
+  puts
+  puts "/* Done */"
 end
