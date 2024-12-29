@@ -328,6 +328,10 @@ class OpenApiRustGenerator
     o.puts
 
     # Api trait that users of the generated library must implement.
+    # TODO: This (?Send) bit is necessary for wasm32 but breaks on native+tokio..
+    # We can generate duplicate trait defs, one for wasm and one native, but then
+    # what happens is consumer code also needs a dupe definition in order for
+    # rust-anayzer to not freak out without exra config.
     o.puts "#[async_trait(?Send)]"
     o.puts "pub trait Api {"
     functions = []

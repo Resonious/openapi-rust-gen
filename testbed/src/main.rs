@@ -2,11 +2,11 @@ use async_trait::*;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 
+use http::{Request, Response};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use http::{Request, Response};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tzt::{handle, Api, ListPetsResponse};
@@ -41,13 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 struct MyApi;
+unsafe impl Send for MyApi {}
 
-#[async_trait]
+#[async_trait(?Send)]
 impl Api for MyApi {
     async fn list_pets(&mut self, page: Option<i32>) -> ListPetsResponse {
-        ListPetsResponse::Http200(vec![
-                                  Default::default()
-        ])
+        ListPetsResponse::Http200(vec![Default::default()])
     }
 }
 
