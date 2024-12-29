@@ -207,10 +207,12 @@ class OpenApiRustGenerator
       end
     end
 
-    result << "    ) -> " << camel_op_name << "Response"
+    return_type = "#{camel_op_name}Response"
+    return_type = "Result<#{return_type}, #{return_type}>"
+
+    result << "    ) -> " << return_type
     if type_param
       result << "\n        where B: http_body::Body + Send\n   "
-    else
     end
     result.join
   end
@@ -232,8 +234,8 @@ class OpenApiRustGenerator
 
         camel_op_name = camelize(operation_name(method, path, definition))
 
-        line = [camel_op_name, "Response::", response_enum_name(status_code, response)]
-        line << "(todo!())" if content
+        line = [camel_op_name, "Ok(Response::", response_enum_name(status_code, response)]
+        line << "(todo!()))" if content
 
         o.puts "        #{line.join}"
 
@@ -506,9 +508,9 @@ class OpenApiRustGenerator
           end
         end
 
-        o.puts "                            let result = api.#{snake_op_name}(\n"
+        o.puts "                            let result = match api.#{snake_op_name}(\n"
         o.puts args.map { |a| "    " * 8 + a }.join("\n")
-        o.puts "                            ).await;"
+        o.puts "                            ).await { Ok(x) => x, Err(x) => x };"
         o.puts "                            match result {"
 
         definition.fetch(:responses).each do |status_code, response|
