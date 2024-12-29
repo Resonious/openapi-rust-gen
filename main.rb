@@ -219,7 +219,7 @@ class OpenApiRustGenerator
     o.puts <<~RUST
     struct MyApi;
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl #{name}::Api for MyApi {
     RUST
 
@@ -328,7 +328,7 @@ class OpenApiRustGenerator
     o.puts
 
     # Api trait that users of the generated library must implement.
-    o.puts "#[async_trait]"
+    o.puts "#[async_trait(?Send)]"
     o.puts "pub trait Api {"
     functions = []
     @schema.fetch(:paths).each do |path, methods|
