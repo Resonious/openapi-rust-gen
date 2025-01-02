@@ -18,7 +18,9 @@ class OpenApiRustGenerator
     last_case = :upper
 
     args.join.chars.each_with_index do |c, index|
-      if c =~ /\w/
+      if c == '_'
+        result_chars << '_'
+      elsif c =~ /\w/
         case state
         when :start
           result_chars << c.downcase
@@ -153,10 +155,15 @@ class OpenApiRustGenerator
       end
     when "integer"
       case prop.fetch(:format, "int64")
+      when "int16" then "i16"
       when "int32" then "i32"
       when "int64" then "i64"
       else raise "? #{prop.to_s.inspect}"
       end
+    when "number"
+      "f64"
+    when "boolean"
+      "bool"
     when "array" then "Vec<#{type_of(prop.fetch(:items), "#{type_name_if_definition_needed}Item")}>"
     when "object"
       @lazy_defs[type_name_if_definition_needed] ||= prop
@@ -234,7 +241,7 @@ class OpenApiRustGenerator
 
         camel_op_name = camelize(operation_name(method, path, definition))
 
-        line = [camel_op_name, "Ok(Response::", response_enum_name(status_code, response)]
+        line = ["Ok(", camel_op_name, "Response::", response_enum_name(status_code, response)]
         line << "(todo!()))" if content
 
         o.puts "        #{line.join}"
@@ -303,6 +310,14 @@ class OpenApiRustGenerator
       when "array"
         items = definition.fetch(:items)
         o.puts "type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
+      when "string"
+        if definition[:enum]
+          @lazy_defs[model] ||= definition
+        else
+          o.puts "type #{model} = String";
+        end
+      else
+        raise "Unknown component type #{definition.inspect}"
       end
     end
 
@@ -334,7 +349,7 @@ class OpenApiRustGenerator
     # We can generate duplicate trait defs, one for wasm and one native, but then
     # what happens is consumer code also needs a dupe definition in order for
     # rust-anayzer to not freak out without exra config.
-    o.puts "#[async_trait(?Send)]"
+    o.puts "#[async_trait]"
     o.puts "pub trait Api {"
     functions = []
     @schema.fetch(:paths).each do |path, methods|
@@ -561,14 +576,50 @@ class OpenApiRustGenerator
           enum_key = enum.sort.inspect
           similar_enums[enum_key] ||= []
           similar_enums[enum_key] << [type_name, definition]
+          default = definition[:default]
 
-          o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
+          derives = %w[Clone Serialize Deserialize Debug PartialEq Eq]
+          derives << "Default" if default
+
+          o.puts "#[derive(#{derives.join(', ')})]"
           o.puts "pub enum #{type_name} {"
           enum.each do |item|
             o.puts "    #[serde(rename = #{item.to_s.inspect})]"
+            o.puts "    #[default]" if item == default
             o.puts "    #{camelize(item)},"
           end
           o.puts "}"
+
+          o.puts "impl #{type_name} {"
+          o.puts "    pub fn as_str(&self) -> &'static str {"
+          o.puts "        match self {"
+          enum.each do |item|
+            o.puts "            Self::#{camelize(item)} => #{item.inspect},"
+          end
+          o.puts "        }"
+          o.puts "    }"
+          o.puts "}"
+
+          if default
+            o.puts "impl From<&str> for #{type_name} {"
+            o.puts "    fn from(value: &str) -> Self {"
+            enum.each do |item|
+              o.puts "        if value == #{item.inspect} { return Self::#{camelize(item)}; }"
+            end
+            o.puts "        Default::default()"
+            o.puts "    }"
+            o.puts "}"
+          else
+            o.puts "impl TryFrom<&str> for #{type_name} {"
+            o.puts "    type Error = ();"
+            o.puts "    fn try_from(value: &str) -> Result<Self, ()> {"
+            enum.each do |item|
+              o.puts "        if value == #{item.inspect} { return Ok(Self::#{camelize(item)}); }"
+            end
+            o.puts "        Err(())"
+            o.puts "    }"
+            o.puts "}"
+          end
         end
       end
     end
@@ -611,11 +662,11 @@ class OpenApiRustGenerator
       [dependencies]
       async-trait = "0.1.83"
       bytes = "1.9.0"
-      http = "1.1.0"
-      http-body = "1.0.1"
-      http-body-util = "0.1.2"
+      http = "*"
+      http-body = "*"
+      http-body-util = "*"
       matchit = "0.8.5"
-      once_cell = "1.20.2"
+      once_cell = "*"
       serde = { version = "1.0.215", features = ["derive"] }
       serde_json = "1.0.133"
       url = "2.5.4"
@@ -636,6 +687,7 @@ if ARGV[0] == 'test'
       assert_equal "one_two_three", OpenApiRustGenerator.snakeize("/one/two/three")
       assert_equal "go_getit", OpenApiRustGenerator.snakeize("go GETIT")
       assert_equal "go_getit", OpenApiRustGenerator.snakeize("goGetit")
+      assert_equal "page_token", OpenApiRustGenerator.snakeize("page_token")
     end
   end
 else
