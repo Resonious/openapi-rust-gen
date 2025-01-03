@@ -453,8 +453,15 @@ class OpenApiRustGenerator
     {
         let (parts, body) = request.into_parts();
 
-        let Ok(url) = Url::parse(&parts.uri.to_string()) else {
-            return response(StatusCode::BAD_REQUEST, "{\\"error\\":\\"bad URL\\"}");
+        let uri = parts.uri.to_string();
+        let uri = if uri.starts_with("/") {
+            format!("http://host{uri}")
+        } else {
+            uri
+        };
+        let url = match Url::parse(&uri) {
+            Ok(parsed) => parsed,
+            Err(_) => return response(StatusCode::BAD_REQUEST, "{\\"error\\":\\"bad URL\\"}"),
         };
         let mut query_pairs = HashMap::new();
         for (key, value) in url.query_pairs() {
