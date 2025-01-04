@@ -219,7 +219,9 @@ class OpenApiRustGenerator
 
     result << "    ) -> " << return_type
     if type_param
-      result << "\n        where B: http_body::Body + Send\n   "
+      result << "\n        where B: http_body::Body + Send,\n"
+      result << "        B::Data: Send,\n"
+      result << "        B::Error: Send,\n    "
     end
     result.join
   end
@@ -449,7 +451,10 @@ class OpenApiRustGenerator
         api: A,
         request: Request<B>,
     ) -> Response<Bytes>
-        where A: Api, B: http_body::Body + Send
+        where A: Api,
+              B: http_body::Body + Send,
+              B::Data: Send,
+              B::Error: Send,
     {
         let (parts, body) = request.into_parts();
 
