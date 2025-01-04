@@ -672,7 +672,7 @@ class OpenApiRustGenerator
       http = "*"
       http-body = "*"
       http-body-util = "*"
-      matchit = "0.8.5"
+      matchit = "*"
       once_cell = "*"
       serde = { version = "1.0.215", features = ["derive"] }
       serde_json = "1.0.133"
