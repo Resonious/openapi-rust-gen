@@ -1,6 +1,7 @@
 require "json"
 require "yaml"
 require "debug"
+require "uri"
 
 class OpenApiRustGenerator
   def initialize(schema)
@@ -280,11 +281,17 @@ class OpenApiRustGenerator
 
     o.puts
 
+    if server = @schema.fetch(:servers, []).first
+      uri = URI(server.fetch(:url))
+      base_path = uri.path
+    end
+
     # Matchit routers for each HTTP method.
     @paths_by_method.each do |method, paths|
       o.puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
       o.puts "    let mut router = Router::new();"
       paths.each do |path|
+        path = base_path + path.to_s if base_path
         o.puts "    router.insert(#{path.to_s.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
       end
       o.puts "    router"
