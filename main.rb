@@ -297,8 +297,8 @@ class OpenApiRustGenerator
       o.puts "static #{snakeize(method).upcase}_ROUTER: Lazy<Router<#{camelize(method)}Path>> = Lazy::new(|| {"
       o.puts "    let mut router = Router::new();"
       paths.each do |path|
-        path = base_path + path.to_s if base_path
-        o.puts "    router.insert(#{path.to_s.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
+        full_path = (base_path || "") + path.to_s
+        o.puts "    router.insert(#{full_path.to_s.inspect}, #{camelize(method)}Path::#{camelize(path)}).unwrap();"
       end
       o.puts "    router"
       o.puts "});"
@@ -321,7 +321,7 @@ class OpenApiRustGenerator
         if definition[:enum]
           @lazy_defs[model] ||= definition
         else
-          o.puts "type #{model} = String";
+          o.puts "type #{model} = String;"
         end
       else
         raise "Unknown component type #{definition.inspect}"
