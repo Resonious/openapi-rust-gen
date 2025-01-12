@@ -8,6 +8,7 @@ class OpenApiRustGenerator
     @schema = schema
     @paths_by_method = collect_paths_by_method
     @lazy_defs = {}
+    @conversions = {}
   end
 
   def self.upper?(c) = c.upcase == c
@@ -124,23 +125,28 @@ class OpenApiRustGenerator
     value
   end
 
-  def puts_struct_fields(output, definition, type_name_prefix)
+  def each_struct_field(definition, &block)
     while ref = definition[:"$ref"]
       definition = follow_ref(ref)
     end
 
     if all_of = definition[:allOf]
-      all_of.each { |d| puts_struct_fields(output, d, type_name_prefix) }
+      all_of.each { |d| each_struct_field(d, &block) }
       return
     end
 
     required = {}
     definition.fetch(:required, []).each { |field| required[field] = true }
 
-    debugger if definition[:properties].nil?
     definition.fetch(:properties).each do |key, prop|
+      yield key, prop, required[key.to_s]
+    end
+  end
+
+  def puts_struct_fields(output, definition, type_name_prefix)
+    each_struct_field(definition) do |key, prop, required|
       type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
-      type = "Option<#{type}>" unless required[key.to_s]
+      type = "Option<#{type}>" unless required
       output.puts "    pub #{key}: #{type},"
     end
   end
@@ -313,6 +319,22 @@ class OpenApiRustGenerator
         o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
         o.puts "pub struct #{model} {"
         puts_struct_fields(o, definition, model)
+
+        if all_of = definition[:allOf]
+          all_of.each do |d|
+            if ref = d[:"$ref"]
+              %r{#/components/schemas/(?<ref_type_name>\w+)} =~ ref
+              if ref_type_name
+                while ref = d[:"$ref"]
+                  d = follow_ref(ref)
+                end
+                @conversions[model] ||= []
+                @conversions[model] << [ref_type_name, d]
+              end
+            end
+          end
+        end
+
         o.puts "}"
       when "array"
         items = definition.fetch(:items)
@@ -356,7 +378,7 @@ class OpenApiRustGenerator
     # We can generate duplicate trait defs, one for wasm and one native, but then
     # what happens is consumer code also needs a dupe definition in order for
     # rust-anayzer to not freak out without exra config.
-    o.puts "#[async_trait]"
+    o.puts "#[async_trait(?Send)]"
     o.puts "pub trait Api {"
     functions = []
     @schema.fetch(:paths).each do |path, methods|
@@ -645,6 +667,21 @@ class OpenApiRustGenerator
             o.puts "}"
           end
         end
+      end
+    end
+
+    @conversions.each do |from_type, destinations|
+      destinations.each do |dest|
+        to_type, to_def = dest
+        o.puts "impl From<#{from_type}> for #{to_type} {"
+        o.puts "    fn from(value: #{from_type}) -> Self {"
+        o.puts "        Self {"
+        each_struct_field(to_def) do |key, _value, _required|
+          o.puts "            #{key}: value.#{key},"
+        end
+        o.puts "        }"
+        o.puts "    }"
+        o.puts "}"
       end
     end
 
