@@ -153,9 +153,14 @@ class OpenApiRustGenerator
 
   def type_of(prop, type_name_if_definition_needed)
     if ref = prop[:"$ref"]
-      %r{#/components/schemas/(?<type_name>\w+)} =~ ref
-      raise "??? #{ref}" if type_name.nil?
-      return type_name
+      %r{#/components/schemas/(?<type_name>\w+)$} =~ ref
+      if type_name.nil?
+        while ref = prop[:"$ref"]
+          prop = follow_ref(ref)
+        end
+      else
+        return type_name
+      end
     end
 
     case prop.fetch(:type)
@@ -208,9 +213,10 @@ class OpenApiRustGenerator
 
       type_name = camelize("#{op_name} #{parameter.fetch(:name)}")
 
-      case parameter.fetch(:in)
-      when "path" then result << type_of(parameter.fetch(:schema), type_name) << ",\n"
-      when "query" then result << "Option<" << type_of(parameter.fetch(:schema), type_name) << ">,\n"
+      case [parameter.fetch(:in), parameter.fetch(:required) { false }]
+      in ["path", _] then result << type_of(parameter.fetch(:schema), type_name) << ",\n"
+      in ["query", false] then result << "Option<" << type_of(parameter.fetch(:schema), type_name) << ">,\n"
+      in ["query", true] then result << type_of(parameter.fetch(:schema), type_name) << ",\n"
       end
     end
 
@@ -323,7 +329,7 @@ class OpenApiRustGenerator
         if all_of = definition[:allOf]
           all_of.each do |d|
             if ref = d[:"$ref"]
-              %r{#/components/schemas/(?<ref_type_name>\w+)} =~ ref
+              %r{#/components/schemas/(?<ref_type_name>\w+)$} =~ ref
               if ref_type_name
                 while ref = d[:"$ref"]
                   d = follow_ref(ref)
@@ -541,13 +547,19 @@ class OpenApiRustGenerator
             "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect()),"
 
           in { in: "query", name: }
-            case type
+            getter = case type
             when "String"
-              "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string()),"
+              "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string())"
             when /i\d{2}/
-              "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") },"
+              "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") }"
             else
               raise "cant hanle #{type.inspect} query param"
+            end
+
+            if parameter.fetch(:required) { false }
+              "match #{getter} { Some(x) => x, None => return invalid_parameter(\"#{name} is required\") },"
+            else
+              "#{getter},"
             end
           else
             raise "Unknown parameter source #{parameter[:in].to_s.inspect}"
