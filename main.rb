@@ -55,7 +55,7 @@ class OpenApiRustGenerator
     state = :was_word_sep
 
     args.join.chars.each_with_index do |c, index|
-      if c =~ /\w/
+      if c =~ /\w/ && c != '_'
         case state
         when :was_word_sep
           result_chars << c.upcase
@@ -751,8 +751,9 @@ if ARGV[0] == 'test'
   require "minitest/autorun"
 
   class Test < Minitest::Test
-    def test_path_enum_ident
+    def test_camelize
       assert_equal "GetOneTwoThree", OpenApiRustGenerator.camelize("get", "/one/{two}/three")
+      assert_equal "OneTwo", OpenApiRustGenerator.camelize("one_two")
       assert_equal "AlreadyCamelized", OpenApiRustGenerator.camelize("AlreadyCamelized")
     end
 
