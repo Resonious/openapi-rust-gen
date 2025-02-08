@@ -151,6 +151,11 @@ class OpenApiRustGenerator
     end
   end
 
+  def with_is_builtin(value, obj)
+    obj.define_singleton_method(:is_builtin?) { value }
+    obj
+  end
+
   def type_of(prop, type_name_if_definition_needed)
     if ref = prop[:"$ref"]
       %r{#/components/schemas/(?<type_name>\w+)$} =~ ref
@@ -159,11 +164,13 @@ class OpenApiRustGenerator
           prop = follow_ref(ref)
         end
       else
-        return type_name
+        return with_is_builtin(false, type_name)
       end
     end
 
-    case prop.fetch(:type)
+    is_builtin = true
+
+    result = case prop.fetch(:type)
     when "string"
       if enum = prop[:enum]
         @lazy_defs[type_name_if_definition_needed] ||= prop
@@ -184,11 +191,14 @@ class OpenApiRustGenerator
       "bool"
     when "array" then "Vec<#{type_of(prop.fetch(:items), "#{type_name_if_definition_needed}Item")}>"
     when "object"
+      is_builtin = false
       @lazy_defs[type_name_if_definition_needed] ||= prop
       type_name_if_definition_needed
     else
       raise "unknown type #{prop.to_s.inspect}"
     end
+
+    with_is_builtin(is_builtin, result)
   end
 
   def fn_def(method, path, definition)
@@ -383,7 +393,7 @@ class OpenApiRustGenerator
               non_unique_enum_arg_types[type] = true
               unique_enum_arg_types.delete(type)
             elsif !non_unique_enum_arg_types[type]
-              unique_enum_arg_types[type] = [status_code, response]
+              unique_enum_arg_types[type] = [type, status_code, response]
             end
           end
 
@@ -394,8 +404,8 @@ class OpenApiRustGenerator
         end
         o.puts "}"
 
-        unique_enum_arg_types.each do |type, rest|
-          status_code, response = rest
+        unique_enum_arg_types.each_value do |value|
+          type, status_code, response = value
           content = response.dig(:content, :"application/json", :schema)
 
           o.puts "impl From<#{type}> for #{response_type} {"
@@ -403,11 +413,14 @@ class OpenApiRustGenerator
           o.puts "        #{response_type}::#{response_enum_name(status_code, response)}(value)"
           o.puts "    }"
           o.puts "}"
-          o.puts "impl From<#{type}> for Result<#{response_type}, #{response_type}> {"
-          o.puts "    fn from(value: #{type}) -> Result<#{response_type}, #{response_type}> {"
-          o.puts "        Ok(#{response_type}::#{response_enum_name(status_code, response)}(value))"
-          o.puts "    }"
-          o.puts "}"
+
+          unless type.is_builtin?
+            o.puts "impl Into<Result<#{response_type}, #{response_type}>> for #{type} {"
+            o.puts "    fn into(self) -> Result<#{response_type}, #{response_type}> {"
+            o.puts "        Ok(#{response_type}::#{response_enum_name(status_code, response)}(self))"
+            o.puts "    }"
+            o.puts "}"
+          end
         end
       end
     end
