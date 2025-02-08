@@ -403,6 +403,11 @@ class OpenApiRustGenerator
           o.puts "        #{response_type}::#{response_enum_name(status_code, response)}(value)"
           o.puts "    }"
           o.puts "}"
+          o.puts "impl From<#{type}> for Result<#{response_type}, #{response_type}> {"
+          o.puts "    fn from(value: #{type}) -> Result<#{response_type}, #{response_type}> {"
+          o.puts "        Ok(#{response_type}::#{response_enum_name(status_code, response)}(value))"
+          o.puts "    }"
+          o.puts "}"
         end
       end
     end
