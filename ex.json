@@ -209,6 +209,16 @@
                 }
               }
             }
+          },
+          "201": {
+            "description": "dumb duplicate response for testing Froms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
           }
         }
       }

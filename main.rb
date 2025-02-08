@@ -359,21 +359,51 @@ class OpenApiRustGenerator
     o.puts
 
     # pub enum GetAbcResponse { Http200(...), ... }
+    # impl From<X> for GetAbcResponse { ... }
     @schema.fetch(:paths).each do |path, methods|
       methods.each do |method, definition|
         op_name = camelize(operation_name(method, path, definition))
 
-        type_name = "#{op_name}Response"
+        response_type = "#{op_name}Response"
 
-        o.puts "pub enum #{type_name} {"
+        unique_enum_arg_types = {}
+        non_unique_enum_arg_types = {}
+
+        o.puts "pub enum #{response_type} {"
         definition.fetch(:responses).each do |status_code, response|
           content = response.dig(:content, :"application/json", :schema)
-          type = type_of(content, "#{type_name}#{response_enum_name(status_code, response)}") if content
-          enum_args = "(#{type})" if type
+          type = type_of(content, "#{response_type}#{response_enum_name(status_code, response)}") if content
 
+          # Keep track of unique enum arg types.
+          # If there is only one status code that responds with a certain type, we can
+          # do an impl From<ThatType> for OpResponse.
+          if type
+            enum_args = "(#{type})"
+            if unique_enum_arg_types[type]
+              non_unique_enum_arg_types[type] = true
+              unique_enum_arg_types.delete(type)
+            elsif !non_unique_enum_arg_types[type]
+              unique_enum_arg_types[type] = [status_code, response]
+            end
+          end
+
+          if desc = response[:description]
+            desc.each_line { |line| o.puts "    /// #{line.strip}" }
+          end
           o.puts "    #{response_enum_name(status_code, response)}#{enum_args},"
         end
         o.puts "}"
+
+        unique_enum_arg_types.each do |type, rest|
+          status_code, response = rest
+          content = response.dig(:content, :"application/json", :schema)
+
+          o.puts "impl From<#{type}> for #{response_type} {"
+          o.puts "    fn from(value: #{type}) -> #{response_type} {"
+          o.puts "        #{response_type}::#{response_enum_name(status_code, response)}(value)"
+          o.puts "    }"
+          o.puts "}"
+        end
       end
     end
 
