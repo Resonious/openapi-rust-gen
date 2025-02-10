@@ -381,6 +381,10 @@ class OpenApiRustGenerator
 
         o.puts "pub enum #{response_type} {"
         definition.fetch(:responses).each do |status_code, response|
+          while ref = response[:"$ref"]
+            response = follow_ref(ref)
+          end
+
           content = response.dig(:content, :"application/json", :schema)
           type = type_of(content, "#{response_type}#{response_enum_name(status_code, response)}") if content
 
@@ -628,6 +632,10 @@ class OpenApiRustGenerator
         o.puts "                            match result {"
 
         definition.fetch(:responses).each do |status_code, response|
+          while ref = response[:"$ref"]
+            response = follow_ref(ref)
+            refd = true
+          end
           actual_status_code = status_code.to_s.to_i
           actual_status_code = 500 if actual_status_code < 100
 
