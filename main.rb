@@ -685,7 +685,7 @@ class OpenApiRustGenerator
           similar_enums[enum_key] << [type_name, definition]
           default = definition[:default]
 
-          derives = %w[Clone Serialize Deserialize Debug PartialEq Eq]
+          derives = %w[Clone Serialize Deserialize Debug PartialEq Eq Hash]
           derives << "Default" if default
 
           o.puts "#[derive(#{derives.join(', ')})]"
