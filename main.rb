@@ -338,6 +338,9 @@ class OpenApiRustGenerator
         type_key = nil
         item_key = nil
 
+        shared_fields = Hash.new { |h, k| h[k] = 0 }
+
+        # Turn each oneOf array entry into a usable Rust type name.
         entries = one_of.map do |one_of_entry|
           case one_of_entry
           in {
@@ -369,10 +372,18 @@ class OpenApiRustGenerator
               raise "oneOf entry had type tag #{type_name} but actual type was inferred to be #{real_type_name}. These should line up."
             end
 
+            each_struct_field(props[item_key]) do |*args|
+              shared_fields[args] += 1
+            end
+
             real_type_name
           else
             raise "oneOf must follow the Serde 'Adjacently tagged' format https://serde.rs/enum-representations.html#adjacently-tagged"
           end
+        end
+
+        shared_fields = shared_fields.keys.select do |key|
+          shared_fields[key] == entries.size
         end
 
         o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
@@ -382,6 +393,32 @@ class OpenApiRustGenerator
           o.puts "    #{type_name}(#{type_name}),"
         end
         o.puts "}"
+
+        # If each entry has some shared fields, make it easy to get and set them
+        # without needing to manually match on each entry.
+        if shared_fields.size > 0
+          o.puts "impl #{model} {"
+          shared_fields.each do |key, value, required|
+            return_type = type_of(value, camelize("#{model} #{key} probably a bug"))
+            return_type = "Option<#{return_type}>" unless required
+            o.puts "    pub fn #{key}(&self) -> #{return_type} {"
+            o.puts "        match self {"
+            entries.each do |entry_type|
+              o.puts "            Self::#{entry_type}(x) => x.#{key},"
+            end
+            o.puts "        }"
+            o.puts "    }"
+
+            o.puts "    pub fn set_#{key}(&mut self, value: #{return_type}) {"
+                        o.puts "        match self {"
+                        entries.each do |entry_type|
+                          o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
+                        end
+                        o.puts "        }"
+                        o.puts "    }"
+          end
+          o.puts "}"
+        end
 
         entries.each do |type_name|
           next if type_name.is_builtin?
