@@ -848,7 +848,7 @@ class OpenApiRustGenerator
         o.puts "    fn from(value: #{from_type}) -> Self {"
         o.puts "        Self {"
         each_struct_field(to_def) do |key, _value, _required|
-          o.puts "            #{key}: value.#{key},"
+          o.puts "            #{key}: value.#{key}.into(),"
         end
         o.puts "        }"
         o.puts "    }"
