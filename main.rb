@@ -145,10 +145,14 @@ class OpenApiRustGenerator
 
   def puts_struct_fields(output, definition, type_name_prefix)
     each_struct_field(definition) do |key, prop, required|
-      type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
-      type = "Option<#{type}>" unless required
-      output.puts "    pub #{key}: #{type},"
+      puts_struct_field(output, key, prop, required, type_name_prefix)
     end
+  end
+
+  def puts_struct_field(output, key, prop, required, type_name_prefix)
+    type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
+    type = "Option<#{type}>" unless required
+    output.puts "    pub #{key}: #{type},"
   end
 
   def with_is_builtin(value, obj)
@@ -330,6 +334,68 @@ class OpenApiRustGenerator
 
     # Create structs for all components.
     @schema.fetch(:components).fetch(:schemas).each do |model, definition|
+      if one_of = definition[:oneOf]
+        type_key = nil
+        item_key = nil
+
+        entries = one_of.map do |one_of_entry|
+          case one_of_entry
+          in {
+            type: "object",
+            required: [type, item],
+            properties: props
+          }
+            if type_key && type_key != type.to_sym
+              raise "oneOf with mismatched type keys #{type_key} & #{type}"
+            end
+            type_key = type.to_sym
+            if item_key && item_key != item.to_sym
+              raise "oneOf with mismatched item keys #{item_key} & #{item}"
+            end
+            item_key = item.to_sym
+
+            type_name = case props[type_key]
+            in {
+              type: "string",
+              enum: [just_one_item]
+            }
+              just_one_item
+            else
+              raise "Expected enum with one entry for type key (inferred to be #{type_key})"
+            end
+
+            real_type_name = type_of(props[item_key], type_name)
+            if real_type_name != type_name
+              raise "oneOf entry had type tag #{type_name} but actual type was inferred to be #{real_type_name}. These should line up."
+            end
+
+            real_type_name
+          else
+            raise "oneOf must follow the Serde 'Adjacently tagged' format https://serde.rs/enum-representations.html#adjacently-tagged"
+          end
+        end
+
+        o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
+        o.puts %{#[serde(tag = "#{type_key}", content = "#{item_key}")]}
+        o.puts "pub enum #{model} {"
+        entries.each do |type_name|
+          o.puts "    #{type_name}(#{type_name}),"
+        end
+        o.puts "}"
+
+        entries.each do |type_name|
+          next if type_name.is_builtin?
+
+          o.puts "impl From<#{type_name}> for #{model} {"
+          o.puts "    fn from(value: #{type_name}) -> #{model} {"
+          o.puts "        #{model}::#{type_name}(value)"
+          o.puts "    }"
+          o.puts "}"
+        end
+
+        next
+      end
+
       case definition.fetch(:type) { definition.fetch(:allOf) }
       when "object", Array
         o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"

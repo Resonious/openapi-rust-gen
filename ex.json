@@ -189,6 +189,18 @@
       "put": {
         "description": "uploads an image to pet",
         "operationId": "upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID of pet to upload to",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "image/png": {
@@ -286,6 +298,45 @@
             "type": "string"
           }
         }
+      },
+      "Shovel": {
+        "type": "object",
+        "properties": {
+          "strength": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "Item": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "item"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["Shovel"]
+              },
+              "item": {
+                "$ref": "#/components/schemas/Shovel"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "item"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["Pet"]
+              },
+              "item": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            }
+          }
+        ]
       }
     }
   }
