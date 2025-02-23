@@ -401,10 +401,10 @@ class OpenApiRustGenerator
           shared_fields.each do |key, value, required|
             return_type = type_of(value, camelize("#{model} #{key} probably a bug"))
             return_type = "Option<#{return_type}>" unless required
-            o.puts "    pub fn #{key}(&self) -> #{return_type} {"
+            o.puts "    pub fn #{key}(&self) -> &#{return_type} {"
             o.puts "        match self {"
             entries.each do |entry_type|
-              o.puts "            Self::#{entry_type}(x) => x.#{key},"
+              o.puts "            Self::#{entry_type}(x) => &x.#{key},"
             end
             o.puts "        }"
             o.puts "    }"
