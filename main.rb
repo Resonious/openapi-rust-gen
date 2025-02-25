@@ -410,12 +410,21 @@ class OpenApiRustGenerator
             o.puts "    }"
 
             o.puts "    pub fn set_#{key}(&mut self, value: #{return_type}) {"
-                        o.puts "        match self {"
-                        entries.each do |entry_type|
-                          o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
-                        end
-                        o.puts "        }"
-                        o.puts "    }"
+            o.puts "        match self {"
+            entries.each do |entry_type|
+              o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
+            end
+            o.puts "        }"
+            o.puts "    }"
+
+            o.puts "    pub fn with_#{key}(self, value: #{return_type}) -> Self {"
+            o.puts "        match self {"
+            entries.each do |entry_type|
+              o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
+            end
+            o.puts "        };"
+            o.puts "        self"
+            o.puts "    }"
           end
           o.puts "}"
         end
