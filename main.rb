@@ -417,8 +417,8 @@ class OpenApiRustGenerator
             o.puts "        }"
             o.puts "    }"
 
-            o.puts "    pub fn with_#{key}(self, value: #{return_type}) -> Self {"
-            o.puts "        match self {"
+            o.puts "    pub fn with_#{key}(mut self, value: #{return_type}) -> Self {"
+            o.puts "        match &mut self {"
             entries.each do |entry_type|
               o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
             end
