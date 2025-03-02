@@ -135,6 +135,8 @@ class OpenApiRustGenerator
       return
     end
 
+    return if definition[:oneOf]
+
     required = {}
     definition.fetch(:required, []).each { |field| required[field] = true }
 
