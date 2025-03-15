@@ -176,6 +176,11 @@ class OpenApiRustGenerator
 
     is_builtin = true
 
+    if one_of = prop[:oneOf]
+      @lazy_defs[type_name_if_definition_needed] ||= prop
+      return with_is_builtin(is_builtin, type_name_if_definition_needed)
+    end
+
     result = case prop.fetch(:type)
     when "string"
       if enum = prop[:enum]
@@ -788,7 +793,21 @@ class OpenApiRustGenerator
       defs.each do |type_name, definition|
         o.puts
 
-        if definition[:type] == "object"
+        if definition[:oneOf].is_a?(Array)
+          if definition[:oneOf].length != 2
+            raise "Sorry! Unsupported oneOf in inline struct (#{definition})"
+          end
+
+          null_types = definition[:oneOf].select { |d| d[:type] == "null" }
+          if null_types.length != 1 || definition[:oneOf].length != 2
+            raise "oneOf arrays with null types must be length 2 with exactly one null type (#{definition})"
+          end
+
+          non_null_type = (definition[:oneOf] - null_types).first
+          type = type_of(non_null_type, "#{type_name}WhenPresent")
+          o.puts "type #{type_name} = Option<#{type}>;"
+
+        elsif definition[:type] == "object"
           o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
           o.puts "pub struct #{type_name} {"
           puts_struct_fields(o, definition, type_name)

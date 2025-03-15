@@ -141,6 +141,23 @@
               }
             }
           },
+          "201": {
+            "description": "MAYBE pet response (nonesense, just to test nullable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Pet"
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "default": {
             "description": "unexpected error",
             "content": {
