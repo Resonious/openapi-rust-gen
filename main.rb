@@ -194,6 +194,7 @@ class OpenApiRustGenerator
       when "int16" then "i16"
       when "int32" then "i32"
       when "int64" then "i64"
+      when "uint64" then "u64"
       else raise "? #{prop.to_s.inspect}"
       end
     when "number"
