@@ -154,7 +154,16 @@ class OpenApiRustGenerator
   def puts_struct_field(output, key, prop, required, type_name_prefix)
     type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
     type = "Option<#{type}>" unless required
-    output.puts "    pub #{key}: #{type},"
+
+    snake_key = snakeize(key)
+    key = key.to_s
+
+    if snake_key != key
+      output.puts "    #[serde(alias = #{key.inspect})]"
+      output.puts "    #[serde(rename(serialize = #{key.inspect}))]"
+    end
+
+    output.puts "    pub #{snake_key}: #{type},"
   end
 
   def with_is_builtin(value, obj)
