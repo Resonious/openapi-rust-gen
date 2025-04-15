@@ -8,6 +8,7 @@ class OpenApiRustGenerator
     @schema = schema
     @paths_by_method = collect_paths_by_method
     @lazy_defs = {}
+    @enum_components = {}
     @conversions = {}
   end
 
@@ -192,8 +193,9 @@ class OpenApiRustGenerator
 
     result = case prop.fetch(:type)
     when "string"
-      if enum = prop[:enum]
+      if prop[:enum]
         @lazy_defs[type_name_if_definition_needed] ||= prop
+        @enum_components[type_name_if_definition_needed] ||= prop
         type_name_if_definition_needed
       else
         "String"
@@ -416,28 +418,29 @@ class OpenApiRustGenerator
         if shared_fields.size > 0
           o.puts "impl #{model} {"
           shared_fields.each do |key, value, required|
+            snake_key = snakeize(key)
             return_type = type_of(value, camelize("#{model} #{key} probably a bug"))
             return_type = "Option<#{return_type}>" unless required
-            o.puts "    pub fn #{key}(&self) -> &#{return_type} {"
+            o.puts "    pub fn #{snake_key}(&self) -> &#{return_type} {"
             o.puts "        match self {"
             entries.each do |entry_type|
-              o.puts "            Self::#{entry_type}(x) => &x.#{key},"
+              o.puts "            Self::#{entry_type}(x) => &x.#{snake_key},"
             end
             o.puts "        }"
             o.puts "    }"
 
-            o.puts "    pub fn set_#{key}(&mut self, value: #{return_type}) {"
+            o.puts "    pub fn set_#{snake_key}(&mut self, value: #{return_type}) {"
             o.puts "        match self {"
             entries.each do |entry_type|
-              o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
+              o.puts "            Self::#{entry_type}(x) => x.#{snake_key} = value,"
             end
             o.puts "        }"
             o.puts "    }"
 
-            o.puts "    pub fn with_#{key}(mut self, value: #{return_type}) -> Self {"
+            o.puts "    pub fn with_#{snake_key}(mut self, value: #{return_type}) -> Self {"
             o.puts "        match &mut self {"
             entries.each do |entry_type|
-              o.puts "            Self::#{entry_type}(x) => x.#{key} = value,"
+              o.puts "            Self::#{entry_type}(x) => x.#{snake_key} = value,"
             end
             o.puts "        };"
             o.puts "        self"
@@ -487,6 +490,7 @@ class OpenApiRustGenerator
       when "string"
         if definition[:enum]
           @lazy_defs[model] ||= definition
+          @enum_components[model] ||= definition
         else
           o.puts "type #{model} = String;"
         end
@@ -721,7 +725,7 @@ class OpenApiRustGenerator
             when /i\d{2}/
               "match params.get(#{name.inspect}).unwrap().parse() { Ok(x) => x, _ => return invalid_parameter(\"#{name} must be an integer\") },"
             else
-              raise "cant hanle #{type.inspect} path param"
+              raise "cant handle #{type.inspect} path param"
             end
 
           in { in: "query", style: "form", name: }
@@ -734,7 +738,11 @@ class OpenApiRustGenerator
             when /i\d{2}/
               "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") }"
             else
-              raise "cant hanle #{type.inspect} query param"
+              if @enum_components[type.to_sym]
+                "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.try_into()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"invalid #{name}\") }"
+              else
+                raise "cant handle #{type.inspect} query param"
+              end
             end
 
             if parameter.fetch(:required) { false }
@@ -857,25 +865,27 @@ class OpenApiRustGenerator
           o.puts "    }"
           o.puts "}"
 
-          if default
-            o.puts "impl From<&str> for #{type_name} {"
-            o.puts "    fn from(value: &str) -> Self {"
-            enum.each do |item|
-              o.puts "        if value == #{item.inspect} { return Self::#{camelize(item)}; }"
+          ["&str", "&Cow<'_, str>"].each do |str_type|
+            if default
+              o.puts "impl From<#{str_type}> for #{type_name} {"
+              o.puts "    fn from(value: #{str_type}) -> Self {"
+              enum.each do |item|
+                o.puts "        if value == #{item.inspect} { return Self::#{camelize(item)}; }"
+              end
+              o.puts "        Default::default()"
+              o.puts "    }"
+              o.puts "}"
+            else
+              o.puts "impl TryFrom<#{str_type}> for #{type_name} {"
+              o.puts "    type Error = ();"
+              o.puts "    fn try_from(value: #{str_type}) -> Result<Self, ()> {"
+              enum.each do |item|
+                o.puts "        if value == #{item.inspect} { return Ok(Self::#{camelize(item)}); }"
+              end
+              o.puts "        Err(())"
+              o.puts "    }"
+              o.puts "}"
             end
-            o.puts "        Default::default()"
-            o.puts "    }"
-            o.puts "}"
-          else
-            o.puts "impl TryFrom<&str> for #{type_name} {"
-            o.puts "    type Error = ();"
-            o.puts "    fn try_from(value: &str) -> Result<Self, ()> {"
-            enum.each do |item|
-              o.puts "        if value == #{item.inspect} { return Ok(Self::#{camelize(item)}); }"
-            end
-            o.puts "        Err(())"
-            o.puts "    }"
-            o.puts "}"
           end
         end
       end
@@ -888,7 +898,7 @@ class OpenApiRustGenerator
         o.puts "    fn from(value: #{from_type}) -> Self {"
         o.puts "        Self {"
         each_struct_field(to_def) do |key, _value, _required|
-          o.puts "            #{key}: value.#{key}.into(),"
+          o.puts "            #{snakeize(key)}: value.#{snakeize(key)}.into(),"
         end
         o.puts "        }"
         o.puts "    }"
