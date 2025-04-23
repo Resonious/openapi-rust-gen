@@ -897,8 +897,12 @@ class OpenApiRustGenerator
         o.puts "impl From<#{from_type}> for #{to_type} {"
         o.puts "    fn from(value: #{from_type}) -> Self {"
         o.puts "        Self {"
-        each_struct_field(to_def) do |key, _value, _required|
-          o.puts "            #{snakeize(key)}: value.#{snakeize(key)}.into(),"
+        each_struct_field(to_def) do |key, _value, required|
+          if required
+            o.puts "            #{snakeize(key)}: value.#{snakeize(key)}.into(),"
+          else
+            o.puts "            #{snakeize(key)}: value.#{snakeize(key)}.map(|x| x.into()).into(),"
+          end
         end
         o.puts "        }"
         o.puts "    }"
