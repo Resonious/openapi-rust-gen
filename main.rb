@@ -4,12 +4,15 @@ require "debug"
 require "uri"
 
 class OpenApiRustGenerator
-  def initialize(schema)
+  attr_reader :async_trait
+
+  def initialize(schema, want_send: true)
     @schema = schema
     @paths_by_method = collect_paths_by_method
     @lazy_defs = {}
     @enum_components = {}
     @conversions = {}
+    @async_trait = want_send ? "async_trait" : "async_trait(?Send)"
   end
 
   def self.upper?(c) = c.upcase == c
@@ -282,7 +285,7 @@ class OpenApiRustGenerator
     o.puts <<~RUST
     struct MyApi;
 
-    #[async_trait(?Send)]
+    #[#{async_trait}]
     impl #{name}::Api for MyApi {
     RUST
 
@@ -565,11 +568,10 @@ class OpenApiRustGenerator
     o.puts
 
     # Api trait that users of the generated library must implement.
-    # TODO: This (?Send) bit is necessary for wasm32 but breaks on native+tokio..
     # We can generate duplicate trait defs, one for wasm and one native, but then
     # what happens is consumer code also needs a dupe definition in order for
     # rust-anayzer to not freak out without exra config.
-    o.puts "#[async_trait(?Send)]"
+    o.puts "#[#{async_trait}]"
     o.puts "pub trait Api {"
     functions = []
     @schema.fetch(:paths).each do |path, methods|
@@ -990,7 +992,7 @@ else
   dir = ARGV[1]
   raise "usage: #{__FILE__} /path/to/schema.json project_dir" if dir.nil?
 
-  generator = OpenApiRustGenerator.new(schema)
+  generator = OpenApiRustGenerator.new(schema, want_send: ARGV[2] != 'nosend')
   generator.generate_project(dir)
 
   puts
