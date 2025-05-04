@@ -790,7 +790,7 @@ class OpenApiRustGenerator
       end
       o.puts "                    }"
       o.puts "                }"
-      o.puts "                Err(MatchError::NotFound) => {"
+      o.puts "                Err(_) => {"
       o.puts "                    render_error(StatusCode::NOT_FOUND, \"not_found\", &format!(\"{} {} is not a valid endpoint\", parts.method.as_str(), url.path()))"
       o.puts "                }"
       o.puts "            }"
