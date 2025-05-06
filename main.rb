@@ -544,6 +544,16 @@ class OpenApiRustGenerator
         end
         o.puts "}"
 
+        o.puts "impl #{response_type} {"
+        o.puts "    fn status_code(&self) -> http::StatusCode {"
+        o.puts "        match self {"
+        definition.fetch(:responses).each do |status_code, response|
+          o.puts "            #{response_type}::#{response_enum_name(status_code, response)}(_) => StatusCode::from_u16(#{status_code}).unwrap(),"
+        end
+        o.puts "        }"
+        o.puts "    }"
+        o.puts "}"
+
         unique_enum_arg_types.each_value do |value|
           type, status_code, response = value
           content = response.dig(:content, :"application/json", :schema)
