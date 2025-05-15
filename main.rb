@@ -515,7 +515,7 @@ class OpenApiRustGenerator
         unique_enum_arg_types = {}
         non_unique_enum_arg_types = {}
 
-        o.puts "#[derive(Debug)}"
+        o.puts "#[derive(Debug)]"
         o.puts "pub enum #{response_type} {"
         definition.fetch(:responses).each do |status_code, response|
           while ref = response[:"$ref"]
