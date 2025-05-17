@@ -497,6 +497,16 @@ class OpenApiRustGenerator
         else
           o.puts "type #{model} = String;"
         end
+      when "integer"
+        t = case definition.fetch(:format, "int64")
+            when "int16" then "i16"
+            when "int32" then "i32"
+            when "int64" then "i64"
+            when "uint64" then "u64"
+            else raise "? #{definition.to_s.inspect}"
+            end
+        o.puts "type #{model} = #{t};"
+      # TODO here
       else
         raise "Unknown component type #{definition.inspect}"
       end
