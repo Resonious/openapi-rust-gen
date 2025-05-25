@@ -316,7 +316,7 @@ class OpenApiRustGenerator
       use bytes::Bytes;
       use http::{HeaderName, Method, Request, Response, StatusCode};
       use http_body_util::BodyExt;
-      use matchit::{Match, MatchError, Router};
+      use matchit::{Match, Router};
       use once_cell::sync::Lazy;
       use serde::{de::DeserializeOwned, Deserialize, Serialize};
       use std::{borrow::Cow, collections::HashMap};
@@ -664,7 +664,7 @@ class OpenApiRustGenerator
     {
         let body_bytes = match body.collect().await {
             Ok(result) => result.to_bytes(),
-            Err(e) => {
+            Err(_) => {
                 return Err(render_error(
                     StatusCode::BAD_REQUEST,
                     "read_failed",
