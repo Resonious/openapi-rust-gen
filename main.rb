@@ -564,7 +564,7 @@ class OpenApiRustGenerator
           end
           content = response.dig(:content, :"application/json", :schema)
           enum_args = "(_)" if content
-          o.puts "            #{response_type}::#{response_enum_name(status_code, response)}#{enum_args} => StatusCode::from_u16(#{status_code}).unwrap(),"
+          o.puts "            #{response_type}::#{response_enum_name(status_code, response)}#{enum_args} => StatusCode::from_u16(#{status_code.to_s.to_i}).unwrap(),"
         end
         o.puts "        }"
         o.puts "    }"
