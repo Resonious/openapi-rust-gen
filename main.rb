@@ -162,6 +162,10 @@ class OpenApiRustGenerator
     snake_key = snakeize(key)
     key = key.to_s
 
+    if desc = prop[:description]
+      desc.each_line { |line| output.puts "    /// #{line.strip}" }
+    end
+
     if snake_key != key
       output.puts "    #[serde(alias = #{key.inspect})]"
       output.puts "    #[serde(rename(serialize = #{key.inspect}))]"
