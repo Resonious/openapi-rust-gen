@@ -209,8 +209,12 @@ class OpenApiRustGenerator
       end
     when "integer"
       case prop.fetch(:format, "int64")
+      when "int8" then "i8"
+      when "uint8" then "u8"
       when "int16" then "i16"
+      when "uint16" then "u16"
       when "int32" then "i32"
+      when "uint32" then "u32"
       when "int64" then "i64"
       when "uint64" then "u64"
       else raise "? #{prop.to_s.inspect}"
