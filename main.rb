@@ -12,6 +12,7 @@ class OpenApiRustGenerator
     @lazy_defs = {}
     @enum_components = {}
     @conversions = {}
+    @validations = {}
     @async_trait = want_send ? "async_trait" : "async_trait(?Send)"
   end
 
@@ -152,7 +153,60 @@ class OpenApiRustGenerator
   def puts_struct_fields(output, definition, type_name_prefix)
     each_struct_field(definition) do |key, prop, required|
       puts_struct_field(output, key, prop, required, type_name_prefix)
+      
+      # Track fields that need validation
+      if prop[:type] == "string" && prop[:maxLength]
+        @validations[type_name_prefix] ||= []
+        @validations[type_name_prefix] << {
+          field: snakeize(key),
+          max_length: prop[:maxLength],
+          required: required
+        }
+      end
     end
+  end
+
+  def schema_has_max_length_strings?(definition)
+    # Recursively check if a schema definition has any string fields with maxLength
+    while ref = definition[:"$ref"]
+      definition = follow_ref(ref)
+    end
+
+    if all_of = definition[:allOf]
+      return all_of.any? { |d| schema_has_max_length_strings?(d) }
+    end
+
+    return false unless definition[:type] == "object"
+    return false unless definition[:properties]
+
+    definition[:properties].any? do |key, prop|
+      prop[:type] == "string" && prop[:maxLength] ||
+      (prop[:type] == "object" && schema_has_max_length_strings?(prop))
+    end
+  end
+
+  def puts_validation_impl(output, type_name)
+    return unless @validations[type_name]
+    
+    output.puts
+    output.puts "impl Validate for #{type_name} {"
+    output.puts "    fn validate(&self) -> Result<(), String> {"
+    @validations[type_name].each do |validation|
+      if validation[:required]
+        output.puts "        if self.#{validation[:field]}.len() > #{validation[:max_length]} {"
+        output.puts "            return Err(format!(\"Field '#{validation[:field]}' exceeds maximum length of #{validation[:max_length]}, got {}\", self.#{validation[:field]}.len()));"
+        output.puts "        }"
+      else
+        output.puts "        if let Some(ref value) = self.#{validation[:field]} {"
+        output.puts "            if value.len() > #{validation[:max_length]} {"
+        output.puts "                return Err(format!(\"Field '#{validation[:field]}' exceeds maximum length of #{validation[:max_length]}, got {}\", value.len()));"
+        output.puts "            }"
+        output.puts "        }"
+      end
+    end
+    output.puts "        Ok(())"
+    output.puts "    }"
+    output.puts "}"
   end
 
   def puts_struct_field(output, key, prop, required, type_name_prefix)
@@ -495,6 +549,9 @@ class OpenApiRustGenerator
         end
 
         o.puts "}"
+        
+        # Generate validation method if there are fields with maxLength
+        puts_validation_impl(o, model)
       when "array"
         items = definition.fetch(:items)
         o.puts "type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
@@ -700,6 +757,24 @@ class OpenApiRustGenerator
 
         Ok(arg)
     }
+    
+    pub trait Validate {
+        fn validate(&self) -> Result<(), String>;
+    }
+    
+    pub async fn read_and_validate_object<B, T>(body: B) -> Result<T, Response<Bytes>>
+        where B: http_body::Body + Send, T: DeserializeOwned + Validate
+    {
+        let obj: T = read_object(body).await?;
+        if let Err(e) = obj.validate() {
+            return Err(render_error(
+                StatusCode::BAD_REQUEST,
+                "validation_error",
+                &e,
+            ));
+        }
+        Ok(obj)
+    }
 
     pub async fn handle<A, B>(
         api: A,
@@ -792,8 +867,24 @@ class OpenApiRustGenerator
         end
 
         if (request_body = definition[:requestBody])
-          if (request_body.dig(:content, :"application/json", :schema))
-            args << "match read_object(body).await { Ok(x) => x, Err(resp) => return resp }"
+          if (json_content = request_body.dig(:content, :"application/json", :schema))
+            type_name = camelize("#{op_name} body")
+            body_type = type_of(json_content, type_name)
+            
+            # Check if this type has validations - need to check the actual resolved type
+            if ref = json_content[:"$ref"]
+              %r{#/components/schemas/(?<schema_name>\w+)$} =~ ref
+              has_validation = @validations[schema_name.to_sym]
+            else
+              # For inline types, check if they will have validation by examining the schema
+              has_validation = schema_has_max_length_strings?(json_content)
+            end
+            
+            if has_validation
+              args << "match read_and_validate_object(body).await { Ok(x) => x, Err(resp) => return resp }"
+            else
+              args << "match read_object(body).await { Ok(x) => x, Err(resp) => return resp }"
+            end
           else
             args << "body"
           end
@@ -866,6 +957,9 @@ class OpenApiRustGenerator
           o.puts "pub struct #{type_name} {"
           puts_struct_fields(o, definition, type_name)
           o.puts "}"
+          
+          # Generate validation method if there are fields with maxLength
+          puts_validation_impl(o, type_name)
         elsif (enum = definition[:enum])
           enum_key = enum.sort.inspect
           similar_enums[enum_key] ||= []
