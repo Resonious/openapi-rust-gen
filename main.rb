@@ -51,7 +51,7 @@ class OpenApiRustGenerator
 
     args.join.chars.each_with_index do |c, index|
       if c == '_'
-        result_chars << '_'
+        state = :was_word_sep
       elsif c =~ /\w/
         case state
         when :start
@@ -1123,6 +1123,7 @@ if ARGV[0] == 'test'
       assert_equal "GetOneTwoThree", OpenApiRustGenerator.camelize("get", "/one/{two}/three")
       assert_equal "OneTwo", OpenApiRustGenerator.camelize("one_two")
       assert_equal "AlreadyCamelized", OpenApiRustGenerator.camelize("AlreadyCamelized")
+      assert_equal "line_2", OpenApiRustGenerator.snakeize("Line2")
     end
 
     def test_snake
@@ -1130,6 +1131,7 @@ if ARGV[0] == 'test'
       assert_equal "go_getit", OpenApiRustGenerator.snakeize("go GETIT")
       assert_equal "go_getit", OpenApiRustGenerator.snakeize("goGetit")
       assert_equal "page_token", OpenApiRustGenerator.snakeize("page_token")
+      assert_equal "line_2", OpenApiRustGenerator.snakeize("line_2")
     end
   end
 else
