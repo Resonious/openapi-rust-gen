@@ -864,20 +864,47 @@ class OpenApiRustGenerator
               raise "cant handle #{type.inspect} path param"
             end
 
-          in { in: "query", style: "form", name: }
-            "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect()),"
-
           in { in: "query", name: }
-            getter = case type
-            when "String"
-              "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string())"
-            when /i\d{2}/
-              "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") }"
-            else
-              if @enum_components[type.to_sym]
-                "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.try_into()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"invalid #{name}\") }"
+            # Check if this is an array type
+            param_schema = parameter.fetch(:schema)
+            is_array = param_schema[:type] == "array" || type.start_with?("Vec<") || parameter[:style] == "form"
+
+            getter = if is_array || parameter[:style] == "form"
+              # Handle array types - collect all values with the same key
+              item_type = if param_schema[:items]
+                type_of(param_schema[:items], "#{camelize(op_name)} #{camelize(name)} Item")
+              elsif type.start_with?("Vec<")
+                # Extract inner type from Vec<T>
+                type[4..-2]
               else
-                raise "cant handle #{type.inspect} query param"
+                "String"  # Default to String if we can't determine the type
+              end
+
+              case item_type
+              when "String"
+                "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect())"
+              when /^[iu]\d{1,2}$/
+                "match query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.parse()).collect::<Result<Vec<_>, _>>()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an array of integers\") }"
+              else
+                if @enum_components[item_type.to_sym]
+                  "match query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.as_ref().try_into()).collect::<Result<Vec<_>, _>>()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"invalid #{name} array values\") }"
+                else
+                  "query_pairs.get(#{name.inspect}).map(|x| x.into_iter().map(|el| el.to_string()).collect())"
+                end
+              end
+            else
+              # Handle non-array types (existing logic)
+              case type
+              when "String"
+                "query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.to_string())"
+              when /^[iu]\d{1,2}$/
+                "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.parse()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"#{name} must be an integer\") }"
+              else
+                if @enum_components[type.to_sym]
+                  "match query_pairs.get(#{name.inspect}).and_then(|x| x.first()).map(|x| x.try_into()) { Some(Ok(x)) => Some(x), None => None, _ => return invalid_parameter(\"invalid #{name}\") }"
+                else
+                  raise "cant handle #{type.inspect} query param"
+                end
               end
             end
 
