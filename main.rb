@@ -1120,7 +1120,7 @@ class OpenApiRustGenerator
   def generate_cargo_toml(name, output)
     title = @schema.dig(:info, :title) || "api"
 
-    output.puts <<~RUST
+    output.puts <<~TOML
       [package]
       name = #{name.to_s.inspect}
       summary = #{title.to_s.inspect}
@@ -1128,17 +1128,17 @@ class OpenApiRustGenerator
       edition = "2021"
 
       [dependencies]
-      async-trait = "0.1.83"
-      bytes = "1.9.0"
+      async-trait = "*"
+      bytes = "*"
       http = "*"
       http-body = "*"
       http-body-util = "*"
       matchit = "*"
       once_cell = "*"
-      serde = { version = "1.0.215", features = ["derive"] }
-      serde_json = "1.0.133"
-      url = "2.5.4"
-    RUST
+      serde = { version = "*", features = ["derive"] }
+      serde_json = "*"
+      url = "*"
+    TOML
   end
 end
 
