@@ -250,6 +250,11 @@ class OpenApiRustGenerator
       output.puts "    #[serde(rename(serialize = #{key.inspect}))]"
     end
 
+    # Add skip_serializing_if for optional fields that are not nullable
+    if !required && !prop[:nullable]
+      output.puts "    #[serde(skip_serializing_if = \"Option::is_none\")]"
+    end
+
     output.puts "    pub #{snake_key}: #{type},"
   end
 
