@@ -1128,7 +1128,7 @@ class OpenApiRustGenerator
     output.puts <<~TOML
       [package]
       name = #{name.to_s.inspect}
-      summary = #{title.to_s.inspect}
+      description = #{title.to_s.inspect}
       version = "0.1.0"
       edition = "2021"
 
