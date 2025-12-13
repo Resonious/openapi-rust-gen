@@ -309,9 +309,14 @@ class OpenApiRustGenerator
       "bool"
     when "array" then "Vec<#{type_of(prop.fetch(:items), "#{type_name_if_definition_needed}Item")}>"
     when "object"
-      is_builtin = false
-      @lazy_defs[type_name_if_definition_needed] ||= prop
-      type_name_if_definition_needed
+      if prop[:properties].nil? && prop[:allOf].nil?
+        # Arbitrary object with no defined properties
+        "serde_json::Value"
+      else
+        is_builtin = false
+        @lazy_defs[type_name_if_definition_needed] ||= prop
+        type_name_if_definition_needed
+      end
     else
       raise "unknown type #{prop.to_s.inspect}"
     end
