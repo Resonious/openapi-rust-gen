@@ -1,0 +1,70 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "OneOf Tagged Unions", "version": "1.0.0" },
+  "paths": {
+    "/events": {
+      "get": {
+        "operationId": "listEvents",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Event" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ClickPayload": {
+        "type": "object",
+        "required": ["x", "y", "element_id"],
+        "properties": {
+          "x": { "type": "integer", "format": "int32" },
+          "y": { "type": "integer", "format": "int32" },
+          "element_id": { "type": "string" },
+          "timestamp": { "type": "integer", "format": "int64" }
+        }
+      },
+      "PageViewPayload": {
+        "type": "object",
+        "required": ["url", "referrer"],
+        "properties": {
+          "url": { "type": "string" },
+          "referrer": { "type": "string" },
+          "timestamp": { "type": "integer", "format": "int64" }
+        }
+      },
+      "Event": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "item"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["ClickPayload"]
+              },
+              "item": { "$ref": "#/components/schemas/ClickPayload" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "item"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["PageViewPayload"]
+              },
+              "item": { "$ref": "#/components/schemas/PageViewPayload" }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

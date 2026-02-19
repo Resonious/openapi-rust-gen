@@ -1,0 +1,162 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Kitchen Sink", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com/v2" }],
+  "paths": {
+    "/resources": {
+      "get": {
+        "operationId": "listResources",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/ResourceKind" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Resource" } }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createResource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateResource" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Resource" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/resources/{id}": {
+      "get": {
+        "operationId": "getResource",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Resource" }
+              }
+            }
+          },
+          "404": { "description": "Not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TagList": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "ResourceId": {
+        "type": "integer",
+        "format": "int64"
+      },
+      "ResourceName": {
+        "type": "string"
+      },
+      "ResourceKind": {
+        "type": "string",
+        "enum": ["alpha", "beta", "gamma"],
+        "default": "alpha"
+      },
+      "Resource": {
+        "type": "object",
+        "required": ["id", "name", "kind"],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/ResourceId" },
+          "name": { "$ref": "#/components/schemas/ResourceName" },
+          "kind": { "$ref": "#/components/schemas/ResourceKind" },
+          "tags": { "$ref": "#/components/schemas/TagList" },
+          "extra": { "type": "object" },
+          "nullable_label": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "string" }
+            ]
+          },
+          "settings": {
+            "type": "object",
+            "required": ["version"],
+            "properties": {
+              "version": { "type": "integer", "format": "int32" },
+              "flags": { "type": "object" }
+            }
+          },
+          "nested_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["value"],
+              "properties": {
+                "value": { "type": "string" },
+                "score": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "CreateResource": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 100 },
+          "kind": { "$ref": "#/components/schemas/ResourceKind" },
+          "tags": { "$ref": "#/components/schemas/TagList" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "integer", "format": "int32" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

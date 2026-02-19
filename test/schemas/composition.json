@@ -1,0 +1,91 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Composition", "version": "1.0.0" },
+  "paths": {
+    "/animals": {
+      "get": {
+        "operationId": "listAnimals",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Animal" } }
+              }
+            }
+          },
+          "500": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAnimal",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NewAnimal" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Animal" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "NewAnimal": {
+        "type": "object",
+        "required": ["name", "species"],
+        "properties": {
+          "name": { "type": "string" },
+          "species": { "type": "string" },
+          "weight_kg": { "type": "number" }
+        }
+      },
+      "Animal": {
+        "allOf": [
+          { "$ref": "#/components/schemas/NewAnimal" },
+          {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "integer", "format": "int64" },
+              "created_at": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "integer", "format": "int32" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

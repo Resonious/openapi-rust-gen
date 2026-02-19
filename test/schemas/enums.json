@@ -1,0 +1,78 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Enums", "version": "1.0.0" },
+  "paths": {
+    "/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/Status" }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": { "$ref": "#/components/schemas/Priority" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Status": {
+        "type": "string",
+        "enum": ["pending", "running", "done", "failed"],
+        "default": "pending"
+      },
+      "Priority": {
+        "type": "string",
+        "enum": ["low", "medium", "high"]
+      },
+      "Task": {
+        "type": "object",
+        "required": ["id", "title", "status"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "title": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/Status" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["bug", "feature", "docs", "chore"]
+            }
+          }
+        }
+      },
+      "AllDefaultsStruct": {
+        "type": "object",
+        "required": ["status", "name"],
+        "properties": {
+          "status": { "$ref": "#/components/schemas/Status" },
+          "name": { "type": "string" }
+        }
+      },
+      "NoDefaultStruct": {
+        "type": "object",
+        "required": ["priority"],
+        "properties": {
+          "priority": { "$ref": "#/components/schemas/Priority" }
+        }
+      }
+    }
+  }
+}

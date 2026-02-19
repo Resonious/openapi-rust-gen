@@ -1,0 +1,88 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Schema Defaults", "version": "1.0.0" },
+  "paths": {
+    "/configs": {
+      "get": {
+        "operationId": "listConfigs",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Config" } }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createConfig",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateConfig" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Config" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Config": {
+        "type": "object",
+        "required": ["id", "name", "mode", "enabled", "retries", "threshold"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "name": { "type": "string" },
+          "mode": {
+            "type": "string",
+            "enum": ["fast", "balanced", "thorough"],
+            "default": "balanced"
+          },
+          "enabled": { "type": "boolean", "default": true },
+          "retries": { "type": "integer", "format": "int32", "default": 3 },
+          "threshold": { "type": "number", "default": 0.95 },
+          "description": { "type": "string", "default": "No description" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "category": { "type": "string" },
+          "max_connections": { "type": "integer", "format": "int32", "default": 100 }
+        }
+      },
+      "CreateConfig": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "mode": {
+            "type": "string",
+            "enum": ["fast", "balanced", "thorough"],
+            "default": "balanced"
+          },
+          "enabled": { "type": "boolean", "default": true },
+          "retries": { "type": "integer", "format": "int32", "default": 3 },
+          "priority": { "type": "number", "default": 1.0 }
+        }
+      },
+      "PureDefaults": {
+        "type": "object",
+        "required": ["label", "count"],
+        "properties": {
+          "label": { "type": "string" },
+          "count": { "type": "integer", "format": "int32" }
+        }
+      }
+    }
+  }
+}
