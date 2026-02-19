@@ -38,6 +38,7 @@ class OpenApiRustGenerator
     @enum_components = {}
     @conversions = {}
     @validations = {}
+    @defaultable_types = {}
     @async_trait = want_send ? "async_trait" : "async_trait(?Send)"
   end
 
@@ -230,6 +231,95 @@ class OpenApiRustGenerator
       end
     end
     output.puts "        Ok(())"
+    output.puts "    }"
+    output.puts "}"
+  end
+
+  def collect_field_defaults(definition, type_name_prefix)
+    fields = []
+    each_struct_field(definition) do |key, prop, required|
+      type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
+      fields << {
+        key: key,
+        snake_key: snakeize(key),
+        type: type.to_s,
+        required: required,
+        prop: prop,
+      }
+    end
+    fields
+  end
+
+  def struct_can_impl_default?(fields)
+    fields.all? do |field|
+      next true unless field[:required]
+      next true if field[:prop].key?(:default)
+      type_is_defaultable?(field[:type])
+    end
+  end
+
+  def has_schema_defaults?(fields)
+    fields.any? { |f| f[:prop].key?(:default) }
+  end
+
+  def type_is_defaultable?(type_str)
+    return true if %w[String bool f64 serde_json::Value].include?(type_str)
+    return true if type_str =~ /^[iu]\d+$/
+    return true if type_str.start_with?("Vec<")
+    return true if type_str.start_with?("Option<")
+    return true if @defaultable_types[type_str]
+    false
+  end
+
+  def schema_value_to_rust(value, type_str, prop)
+    return "Default::default()" if value.nil?
+
+    case type_str
+    when "String"
+      "#{value.to_s.inspect}.to_string()"
+    when "bool"
+      value.to_s
+    when "f64"
+      s = value.to_f.to_s
+      s += ".0" unless s.include?(".")
+      s
+    when /^[iu]\d+$/
+      value.to_i.to_s
+    else
+      if prop[:enum] || @enum_components[type_str] || @enum_components[type_str.to_sym]
+        "#{type_str}::#{camelize(value.to_s)}"
+      elsif type_str.start_with?("Vec<")
+        "Vec::new()"
+      else
+        "Default::default()"
+      end
+    end
+  end
+
+  def field_default_expr(field)
+    unless field[:required]
+      if field[:prop].key?(:default) && !field[:prop][:default].nil?
+        return "Some(#{schema_value_to_rust(field[:prop][:default], field[:type], field[:prop])})"
+      end
+      return "None"
+    end
+
+    if field[:prop].key?(:default)
+      return schema_value_to_rust(field[:prop][:default], field[:type], field[:prop])
+    end
+
+    "Default::default()"
+  end
+
+  def puts_default_impl(output, type_name, fields)
+    output.puts
+    output.puts "impl Default for #{type_name} {"
+    output.puts "    fn default() -> Self {"
+    output.puts "        Self {"
+    fields.each do |field|
+      output.puts "            #{field[:snake_key]}: #{field_default_expr(field)},"
+    end
+    output.puts "        }"
     output.puts "    }"
     output.puts "}"
   end
@@ -564,7 +654,14 @@ class OpenApiRustGenerator
 
       case definition.fetch(:type) { definition.fetch(:allOf) }
       when "object", Array
-        o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
+        fields = collect_field_defaults(definition, model)
+        can_default = struct_can_impl_default?(fields)
+        needs_manual_default = can_default && has_schema_defaults?(fields)
+
+        derives = %w[Clone Serialize Deserialize Debug]
+        derives << "Default" if can_default && !needs_manual_default
+
+        o.puts "#[derive(#{derives.join(', ')})]"
         o.puts "pub struct #{model} {"
         puts_struct_fields(o, definition, model)
 
@@ -584,18 +681,26 @@ class OpenApiRustGenerator
         end
 
         o.puts "}"
-        
+
         # Generate validation method if there are fields with maxLength
         puts_validation_impl(o, model)
+
+        if needs_manual_default
+          puts_default_impl(o, model.to_s, fields)
+        end
+
+        @defaultable_types[model.to_s] = true if can_default
       when "array"
         items = definition.fetch(:items)
         o.puts "type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
+        @defaultable_types[model.to_s] = true
       when "string"
         if definition[:enum]
           @lazy_defs[model] ||= definition
           @enum_components[model] ||= definition
         else
           o.puts "type #{model} = String;"
+          @defaultable_types[model.to_s] = true
         end
       when "integer"
         t = case definition.fetch(:format, "int64")
@@ -606,6 +711,7 @@ class OpenApiRustGenerator
             else raise "? #{definition.to_s.inspect}"
             end
         o.puts "type #{model} = #{t};"
+        @defaultable_types[model.to_s] = true
       # TODO here
       else
         raise "Unknown component type #{definition.inspect}"
@@ -1013,15 +1119,29 @@ class OpenApiRustGenerator
           non_null_type = (definition[:oneOf] - null_types).first
           type = type_of(non_null_type, "#{type_name}WhenPresent")
           o.puts "type #{type_name} = Option<#{type}>;"
+          @defaultable_types[type_name.to_s] = true
 
         elsif definition[:type] == "object"
-          o.puts "#[derive(Clone, Serialize, Deserialize, Debug)]"
+          fields = collect_field_defaults(definition, type_name)
+          can_default = struct_can_impl_default?(fields)
+          needs_manual_default = can_default && has_schema_defaults?(fields)
+
+          derives = %w[Clone Serialize Deserialize Debug]
+          derives << "Default" if can_default && !needs_manual_default
+
+          o.puts "#[derive(#{derives.join(', ')})]"
           o.puts "pub struct #{type_name} {"
           puts_struct_fields(o, definition, type_name)
           o.puts "}"
-          
+
           # Generate validation method if there are fields with maxLength
           puts_validation_impl(o, type_name)
+
+          if needs_manual_default
+            puts_default_impl(o, type_name.to_s, fields)
+          end
+
+          @defaultable_types[type_name.to_s] = true if can_default
         elsif (enum = definition[:enum])
           enum_key = enum.sort.inspect
           similar_enums[enum_key] ||= []
@@ -1079,6 +1199,7 @@ class OpenApiRustGenerator
               o.puts "}"
             end
           end
+          @defaultable_types[type_name.to_s] = true if default
         end
       end
     end
