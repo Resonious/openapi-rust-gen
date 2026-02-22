@@ -692,14 +692,14 @@ class OpenApiRustGenerator
         @defaultable_types[model.to_s] = true if can_default
       when "array"
         items = definition.fetch(:items)
-        o.puts "type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
+        o.puts "pub type #{model} = Vec<#{type_of(items, "#{model}Item")}>;"
         @defaultable_types[model.to_s] = true
       when "string"
         if definition[:enum]
           @lazy_defs[model] ||= definition
           @enum_components[model] ||= definition
         else
-          o.puts "type #{model} = String;"
+          o.puts "pub type #{model} = String;"
           @defaultable_types[model.to_s] = true
         end
       when "integer"
@@ -710,7 +710,7 @@ class OpenApiRustGenerator
             when "uint64" then "u64"
             else raise "? #{definition.to_s.inspect}"
             end
-        o.puts "type #{model} = #{t};"
+        o.puts "pub type #{model} = #{t};"
         @defaultable_types[model.to_s] = true
       # TODO here
       else
@@ -1118,7 +1118,7 @@ class OpenApiRustGenerator
 
           non_null_type = (definition[:oneOf] - null_types).first
           type = type_of(non_null_type, "#{type_name}WhenPresent")
-          o.puts "type #{type_name} = Option<#{type}>;"
+          o.puts "pub type #{type_name} = Option<#{type}>;"
           @defaultable_types[type_name.to_s] = true
 
         elsif definition[:type] == "object"
