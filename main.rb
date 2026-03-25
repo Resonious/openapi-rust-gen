@@ -28,6 +28,171 @@ require "yaml"
 require "debug"
 require "uri"
 
+NULLABLE_RS = <<~'RUST'
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// Represents a field that distinguishes between undefined (absent), null, and present values.
+/// Used for non-required, nullable API fields where the distinction matters for PATCH semantics.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Nullable<T> {
+    /// Field has a value.
+    Some(T),
+    /// Field is explicitly null.
+    Null,
+    /// Field is absent / not provided.
+    Undefined,
+}
+
+impl<T> Default for Nullable<T> {
+    fn default() -> Self {
+        Nullable::Undefined
+    }
+}
+
+impl<T> Nullable<T> {
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, Nullable::Undefined)
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Nullable::Null)
+    }
+
+    pub fn is_some(&self) -> bool {
+        matches!(self, Nullable::Some(_))
+    }
+
+    pub fn as_ref(&self) -> Nullable<&T> {
+        match self {
+            Nullable::Some(v) => Nullable::Some(v),
+            Nullable::Null => Nullable::Null,
+            Nullable::Undefined => Nullable::Undefined,
+        }
+    }
+
+    pub fn as_deref(&self) -> Nullable<&T::Target>
+    where
+        T: std::ops::Deref,
+    {
+        match self {
+            Nullable::Some(v) => Nullable::Some(v.deref()),
+            Nullable::Null => Nullable::Null,
+            Nullable::Undefined => Nullable::Undefined,
+        }
+    }
+
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Nullable<U> {
+        match self {
+            Nullable::Some(v) => Nullable::Some(f(v)),
+            Nullable::Null => Nullable::Null,
+            Nullable::Undefined => Nullable::Undefined,
+        }
+    }
+
+    /// Convert to Option, treating both Null and Undefined as None.
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Nullable::Some(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Convert from Option, mapping None to Null (not Undefined).
+    pub fn from_option(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Nullable::Some(v),
+            None => Nullable::Null,
+        }
+    }
+
+    pub fn unwrap(self) -> T {
+        match self {
+            Nullable::Some(v) => v,
+            _ => panic!("called unwrap() on a Null or Undefined Nullable"),
+        }
+    }
+
+    pub fn unwrap_or(self, default: T) -> T {
+        match self {
+            Nullable::Some(v) => v,
+            _ => default,
+        }
+    }
+
+    pub fn unwrap_or_else<F: FnOnce() -> T>(self, f: F) -> T {
+        match self {
+            Nullable::Some(v) => v,
+            _ => f(),
+        }
+    }
+
+    pub fn and_then<U, F: FnOnce(T) -> Nullable<U>>(self, f: F) -> Nullable<U> {
+        match self {
+            Nullable::Some(v) => f(v),
+            Nullable::Null => Nullable::Null,
+            Nullable::Undefined => Nullable::Undefined,
+        }
+    }
+
+    pub fn or_else<F: FnOnce() -> Nullable<T>>(self, f: F) -> Nullable<T> {
+        match self {
+            Nullable::Some(_) => self,
+            _ => f(),
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+}
+
+impl<T: Clone> Nullable<T> {
+    pub fn cloned(&self) -> Nullable<T> {
+        match self {
+            Nullable::Some(v) => Nullable::Some(v.clone()),
+            Nullable::Null => Nullable::Null,
+            Nullable::Undefined => Nullable::Undefined,
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Nullable<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Nullable::Some(v) => v.serialize(serializer),
+            Nullable::Null => serializer.serialize_none(),
+            // Undefined should be skipped by skip_serializing_if; if we get here, serialize as null
+            Nullable::Undefined => serializer.serialize_none(),
+        }
+    }
+}
+
+/// Custom deserializer that distinguishes null from absent.
+/// When a field is absent, serde uses Default (= Undefined).
+/// When a field is present with null, this gives Null.
+/// When present with a value, this gives Some(T).
+pub fn deserialize_nullable<'de, T, D>(deserializer: D) -> Result<Nullable<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    match opt {
+        Some(v) => Ok(Nullable::Some(v)),
+        None => Ok(Nullable::Null),
+    }
+}
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Nullable::Some(v),
+            None => Nullable::Null,
+        }
+    }
+}
+RUST
+
 class OpenApiRustGenerator
   attr_reader :async_trait
 
@@ -118,6 +283,10 @@ class OpenApiRustGenerator
         generate_lib_rs(lib_rs)
       end
 
+      File.open("src/nullable.rs", "w") do |f|
+        f.write NULLABLE_RS
+      end
+
       generate_example("crate", STDOUT)
     end
   end
@@ -186,7 +355,8 @@ class OpenApiRustGenerator
         @validations[type_name_prefix] << {
           field: snakeize(key),
           max_length: prop[:maxLength],
-          required: required
+          required: required,
+          nullable: !required && prop[:nullable]
         }
       end
     end
@@ -221,6 +391,12 @@ class OpenApiRustGenerator
       if validation[:required]
         output.puts "        if self.#{validation[:field]}.len() > #{validation[:max_length]} {"
         output.puts "            return Err(format!(\"Field '#{validation[:field]}' exceeds maximum length of #{validation[:max_length]}, got {}\", self.#{validation[:field]}.len()));"
+        output.puts "        }"
+      elsif validation[:nullable]
+        output.puts "        if let Nullable::Some(ref value) = self.#{validation[:field]} {"
+        output.puts "            if value.len() > #{validation[:max_length]} {"
+        output.puts "                return Err(format!(\"Field '#{validation[:field]}' exceeds maximum length of #{validation[:max_length]}, got {}\", value.len()));"
+        output.puts "            }"
         output.puts "        }"
       else
         output.puts "        if let Some(ref value) = self.#{validation[:field]} {"
@@ -267,6 +443,7 @@ class OpenApiRustGenerator
     return true if type_str =~ /^[iu]\d+$/
     return true if type_str.start_with?("Vec<")
     return true if type_str.start_with?("Option<")
+    return true if type_str.start_with?("Nullable<")
     return true if @defaultable_types[type_str]
     false
   end
@@ -298,10 +475,12 @@ class OpenApiRustGenerator
 
   def field_default_expr(field)
     unless field[:required]
+      is_nullable = field[:prop][:nullable]
       if field[:prop].key?(:default) && !field[:prop][:default].nil?
-        return "Some(#{schema_value_to_rust(field[:prop][:default], field[:type], field[:prop])})"
+        wrapper = is_nullable ? "Nullable::Some" : "Some"
+        return "#{wrapper}(#{schema_value_to_rust(field[:prop][:default], field[:type], field[:prop])})"
       end
-      return "None"
+      return is_nullable ? "Nullable::Undefined" : "None"
     end
 
     if field[:prop].key?(:default)
@@ -326,7 +505,13 @@ class OpenApiRustGenerator
 
   def puts_struct_field(output, key, prop, required, type_name_prefix)
     type = type_of(prop, camelize("#{type_name_prefix} #{key}"))
-    type = "Option<#{type}>" unless required
+    is_nullable_field = !required && prop[:nullable]
+
+    if is_nullable_field
+      type = "Nullable<#{type}>"
+    elsif !required
+      type = "Option<#{type}>"
+    end
 
     snake_key = snakeize(key)
     key = key.to_s
@@ -340,8 +525,10 @@ class OpenApiRustGenerator
       output.puts "    #[serde(rename(serialize = #{key.inspect}))]"
     end
 
-    # Add skip_serializing_if for optional fields that are not nullable
-    if !required && !prop[:nullable]
+    if is_nullable_field
+      output.puts "    #[serde(default, deserialize_with = \"deserialize_nullable\")]"
+      output.puts "    #[serde(skip_serializing_if = \"Nullable::is_undefined\")]"
+    elsif !required
       output.puts "    #[serde(skip_serializing_if = \"Option::is_none\")]"
     end
 
@@ -499,6 +686,9 @@ class OpenApiRustGenerator
 
   def generate_lib_rs(o)
     o.puts <<~RUST
+      pub mod nullable;
+      pub use nullable::{Nullable, deserialize_nullable};
+
       use async_trait::*;
       use bytes::Bytes;
       use http::{HeaderName, Method, Request, Response, StatusCode};
